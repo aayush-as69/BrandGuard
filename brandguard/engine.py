@@ -304,8 +304,16 @@ def review(
             for fact in claim_facts:
                 data = fact["data"]
                 hit = False
+                # Spans of the approved wording, so "medium-dark roast" never trips "dark roast".
+                approved_spans = [
+                    (m.start(), m.end())
+                    for k in data.get("keywords", [])
+                    for m in re.finditer(re.escape(k), sent, re.I)
+                ]
                 for bad in data.get("contradicts", []):
-                    for m in re.finditer(re.escape(bad), sent, re.I):
+                    for m in re.finditer(rf"(?<![\w-]){re.escape(bad)}", sent, re.I):
+                        if any(s <= m.start() and m.end() <= e for s, e in approved_spans):
+                            continue
                         hit = True
                         add_claim(sent, "contradicted", fact["code"])
                         raw.append(fact_finding(
