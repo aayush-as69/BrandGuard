@@ -34,7 +34,7 @@ def test_all_seeded_traps_are_caught(tmp_path, demo):
     assert (date.span_text, date.suggested_fix) == ("1 December 2026", "15 December 2026")
     assert by_source(f, "F-04")[0].suggested_fix == "medium-dark roast"
     # banned term and off-tone language
-    assert any(x.category == "terminology" and x.span_text == "cheap" for x in f)
+    assert any(x.category == "terminology" and x.span_text.endswith("cheap") for x in f)
     assert {x.span_text for x in f if x.category == "tone"} >= {"Dude", "insanely good", "!!!"}
     # accessibility: missing alt text and low contrast
     acc = [x for x in f if x.category == "accessibility"]
@@ -174,3 +174,28 @@ def test_finding_schema_rejects_malformed_records():
     with pytest.raises(pydantic.ValidationError):
         Finding(category="nonsense", issue="ok issue", source_type="guideline", source_id="G-01",
                 source_quote="quote", severity="low", confidence="high")
+
+
+# ------------------------------------------------------------- fix wording
+def test_fix_at_sentence_start_is_capitalised(tmp_path, demo):
+    _, k = make_kb(tmp_path)
+    r = engine.review(k, demo["body"], demo["images"])
+    rank = next(f for f in r.findings if f.category == "claim")
+    assert rank.suggested_fix == "Our coffee"  # starts the sentence
+    mid = engine.review(k, "Hello,\n\nWe think this is India's #1 coffee for sure.", [])
+    assert next(f for f in mid.findings if f.category == "claim").suggested_fix == "our coffee"
+
+
+def test_article_agrees_after_replacement(tmp_path, demo):
+    _, k = make_kb(tmp_path)
+    r = engine.review(k, demo["body"], demo["images"])
+    cheap = next(f for f in r.findings if f.category == "terminology")
+    assert cheap.span_text == "a cheap" and cheap.suggested_fix == "an affordable"
+    assert engine.verify(cheap, k, demo["body"], demo["images"]) is None
+    applied = demo["body"][:cheap.span_start] + cheap.suggested_fix + demo["body"][cheap.span_end:]
+    assert "an affordable price" in applied and "a affordable" not in applied
+    # no article change needed when it already agrees
+    ok = engine.review(k, "This is an addictive blend.", [])
+    assert next(f for f in ok.findings).suggested_fix == "irresistible"  # "an" is already right
+    plain = engine.review(k, "Our cheap beans.", [])
+    assert next(f for f in plain.findings).suggested_fix == "affordable"

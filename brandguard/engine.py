@@ -205,14 +205,24 @@ def review(
             continue
         for m in re.finditer(rf"(?<![\w-]){re.escape(g['term'])}(?![\w-])", body, re.I):
             tone = g["kind"] == "slang"
+            start, text = m.start(), m.group()
+            fix = match_case(text, g["preferred"])
+            # Keep "a"/"an" correct: "a cheap price" -> "an affordable price".
+            art = re.search(r"\b(an?)(\s+)$", body[:start], re.I)
+            if art and fix[:1].isalpha():
+                want = "an" if fix[0].lower() in "aeiou" else "a"
+                if art.group(1).lower() != want:
+                    start = art.start()
+                    text = body[start:m.end()]
+                    fix = f"{match_case(art.group(1), want)}{art.group(2)}{fix}"
             raw.append(guideline_finding(
                 code,
                 category="tone" if tone else "terminology",
                 issue=(f"'{m.group()}' is {'off-tone slang' if tone else 'a banned term'}; "
                        f"use '{g['preferred']}'." + (f" {g['note']}" if g.get("note") else "")),
-                span_text=m.group(), span_start=m.start(), span_end=m.end(),
+                span_text=text, span_start=start, span_end=m.end(),
                 severity="medium", confidence="high",
-                suggested_fix=match_case(m.group(), g["preferred"]),
+                suggested_fix=fix,
             ))
 
     # 2. Punctuation and emphasis -----------------------------------------------
@@ -405,6 +415,14 @@ def review(
                     suggested_fix=darken_to_pass(fg, bg, need),
                     fix_note="Suggested colour is the closest shade that passes.",
                 ))
+
+    # A fix that lands at the start of a sentence starts with a capital letter.
+    sentence_start = re.compile(r"(?:^|\n|[.!?][\"')\]]*[ \t]+)$")
+    for f in raw:
+        fix = f.suggested_fix
+        if (f.target == "body" and fix and f.span_start >= 0 and fix[0].isalpha() and fix[0].islower()
+                and sentence_start.search(body[:f.span_start])):
+            f.suggested_fix = fix[0].upper() + fix[1:]
 
     # 5. Verify everything, then optionally ask the grounded LLM judge --------------
     for f in raw:
