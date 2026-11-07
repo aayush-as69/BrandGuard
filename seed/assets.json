@@ -1,0 +1,5 @@
+[
+  {"name": "brewline-logo-primary.svg", "kind": "logo", "note": "Primary logo. Keep clear space equal to the height of the B.", "access_level": "internal"},
+  {"name": "brewline-palette", "kind": "colour", "note": "Espresso #3B2314, Crema #F4E9D8, Copper #B87333.", "access_level": "internal"},
+  {"name": "pouch-hero-2026.png", "kind": "image", "note": "Approved launch hero image for Signature Blend.", "access_level": "internal"}
+]

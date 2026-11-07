@@ -1,0 +1,38 @@
+[
+  {
+    "code": "F-01",
+    "kind": "price",
+    "statement": "Brewline Signature Blend 250g pouch is priced at ₹449.",
+    "data": {"amount": 449, "match": ["250g", "signature blend", "pouch"]},
+    "source": "Brewline Fact Sheet v3 (synthetic)",
+    "access_level": "confidential"
+  },
+  {
+    "code": "F-02",
+    "kind": "date",
+    "statement": "Brewline Signature Blend launches on 15 December 2026.",
+    "data": {"date": "2026-12-15", "match": ["launch", "available from", "on sale"]},
+    "source": "Brewline Fact Sheet v3 (synthetic)",
+    "access_level": "confidential"
+  },
+  {
+    "code": "F-03",
+    "kind": "claim",
+    "statement": "Signature Blend beans are sourced from estates in Coorg and Chikmagalur.",
+    "data": {"keywords": ["coorg", "chikmagalur"]},
+    "source": "Brewline Fact Sheet v3 (synthetic)",
+    "access_level": "confidential"
+  },
+  {
+    "code": "F-04",
+    "kind": "claim",
+    "statement": "Signature Blend is a medium-dark roast.",
+    "data": {
+      "keywords": ["medium-dark", "medium dark"],
+      "contradicts": ["light roast", "dark roast"],
+      "fix": "medium-dark roast"
+    },
+    "source": "Brewline Fact Sheet v3 (synthetic)",
+    "access_level": "confidential"
+  }
+]

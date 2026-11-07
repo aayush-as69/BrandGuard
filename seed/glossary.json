@@ -1,0 +1,7 @@
+[
+  {"term": "cheap", "preferred": "affordable", "kind": "banned", "rule_code": "G-03", "note": "Cheap signals low quality."},
+  {"term": "addictive", "preferred": "irresistible", "kind": "banned", "rule_code": "G-07", "note": "Health language."},
+  {"term": "dude", "preferred": "Hello", "kind": "slang", "rule_code": "G-01", "note": "Too casual for the brand voice."},
+  {"term": "insanely good", "preferred": "wonderful", "kind": "slang", "rule_code": "G-01", "note": "Hype language."},
+  {"term": "game-changer", "preferred": "standout", "kind": "slang", "rule_code": "G-01", "note": "Hype language."}
+]

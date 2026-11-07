@@ -1,0 +1,10 @@
+{
+  "rule_checks": {
+    "exclamation": {"rule_code": "G-02", "max": 1},
+    "all_caps": {"rule_code": "G-02", "allow": ["UPI", "USA", "FAQ", "PDF", "ASCI", "RSVP"]},
+    "claims": {"rule_code": "G-04"},
+    "facts": {"rule_code": "G-05"},
+    "alt_text": {"rule_code": "G-06", "min_len": 5, "max_len": 125},
+    "contrast": {"rule_code": "G-06", "min_ratio": 4.5}
+  }
+}
