@@ -119,7 +119,7 @@ def test_full_approval_flow(seeded, login, demo):
     neha.post(f"/api/content/{cid}/submit")
     assert meera.post(f"/api/content/{cid}/approve").status_code == 200
     final = detail(meera, cid)
-    assert final["content"]["status"] == "approved"
+    assert final["content"]["status"] == "approved" and final["content"]["approved_by"] == "Meera"
     assert {"submitted", "changes_requested", "approved"} <= {a["action"] for a in final["audit"]}
     # approved content is locked
     assert neha.post(f"/api/content/{cid}/revise", body="changed", images=[]).status_code == 403
@@ -191,8 +191,9 @@ def test_comments_and_audit_trail(seeded, login, demo):
 def test_revise_creates_new_version_and_rereviews(seeded, login, demo):
     neha = login(NEHA)
     cid = create_demo(neha, demo)
-    body = detail(neha, cid)["body"].replace("cheap", "affordable")
+    body = detail(neha, cid)["body"].replace("a cheap", "an affordable")
     assert neha.post(f"/api/content/{cid}/revise", body=body, images=demo["images"]).status_code == 200
     d = detail(neha, cid)
     assert d["content"]["current_version"] == 2
-    assert not [f for f in d["findings"] if f["span_text"] == "cheap"]
+    assert not [f for f in d["findings"] if f["category"] == "terminology"]
+    assert "a affordable" not in d["body"]

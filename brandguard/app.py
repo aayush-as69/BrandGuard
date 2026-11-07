@@ -210,6 +210,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "SELECT v.version, v.note, v.created_at, u.name AS author FROM versions v JOIN users u ON u.id=v.created_by "
             "WHERE v.content_id=? ORDER BY v.version DESC", (cid,))]
         author = c.execute("SELECT name FROM users WHERE id=?", (content["author_id"],)).fetchone()["name"]
+        approver = c.execute(
+            "SELECT u.name FROM audit a JOIN users u ON u.id=a.user_id "
+            "WHERE a.content_id=? AND a.action='approved' ORDER BY a.id DESC LIMIT 1", (cid,)).fetchone()
+        content["approved_by"] = approver["name"] if approver else None
         audit_rows = []
         if user["role"] != "creator":  # audit trail is for managers, reviewers and admins
             audit_rows = [dict(r) for r in c.execute(
