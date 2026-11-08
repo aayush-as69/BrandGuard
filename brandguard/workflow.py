@@ -28,6 +28,7 @@ APPROVER_ROLES = {"manager", "reviewer"}
 RISKY = {"fact", "claim"}
 
 MAX_TITLE, MAX_BODY, MAX_IMAGES, MAX_FIELD, MAX_COMMENT = 200, 50_000, 20, 500, 2000
+CONTEXT = 40  # text either side (within the sentence) that must match for a dismissal to carry to the same spot
 _HEX = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
@@ -128,7 +129,24 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     ver = c["current_version"]
     previous = [dict(r) for r in conn.execute(
         "SELECT * FROM findings WHERE content_id=? AND decision='dismissed'", (content_id,))]
-    carry = {(p["source_id"], p["span_text"], p["category"]): p for p in previous}
+    bodies: dict[int, str] = {}
+
+    def context(version: int, start: int, end: int) -> tuple[str, str]:
+        """A little text either side, so a dismissal covers this spot and not every identical word."""
+        if version not in bodies:
+            bodies[version] = version_row(conn, content_id, version)["body"]
+        b = bodies[version]
+        before = re.split(r"[.!?\n]", b[max(0, start - CONTEXT):start])[-1]   # same sentence only, so an
+        after = re.split(r"[.!?\n]", b[end:end + CONTEXT])[0]                 # edit next door changes nothing
+        return " ".join(before.split()), " ".join(after.split())
+
+    carry = {}
+    for p in previous:
+        if p["target"] == "body":
+            key = (p["source_id"], p["span_text"], p["category"], *context(p["version"], p["span_start"], p["span_end"]))
+        else:
+            key = (p["source_id"], p["span_text"], p["category"], "", "")
+        carry[key] = p
 
     inherited: list[Finding] = []
     if ai == "inherit" and ver > 1:
@@ -158,7 +176,8 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     conn.execute("DELETE FROM claims WHERE content_id=? AND version=?", (content_id, ver))
     carried = 0
     for f in result.findings:
-        old = carry.get((f.source_id, f.span_text, f.category))
+        near = context(ver, f.span_start, f.span_end) if f.target == "body" else ("", "")
+        old = carry.get((f.source_id, f.span_text, f.category, *near))
         decision = ("dismissed", f"(carried over) {old['decision_reason']}", old["decided_by"], old["decided_at"]) \
             if old else ("open", "", None, None)
         carried += 1 if old else 0
@@ -176,7 +195,8 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
             "INSERT INTO claims(content_id, version, text, status, source_id) VALUES (?,?,?,?,?)",
             (content_id, ver, cl["text"], cl["status"], cl["source_id"]),
         )
-    meta = {"warnings": result.warnings, "rejected": result.rejected, "llm_status": result.llm_status}
+    meta = {"warnings": result.warnings, "rejected": result.rejected, "llm_status": result.llm_status,
+            "truncated": result.truncated}
     conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
                  (json.dumps(meta), content_id, ver))
     audit(conn, content_id, None, "review_run",
@@ -349,6 +369,9 @@ def submit(conn, user: dict, content_id: int) -> None:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_submit"]:
         raise Forbidden("Only the author can submit, and only a draft or content with changes requested")
+    hidden = current(conn, c)["review_meta"].get("truncated", 0)
+    if hidden:
+        raise ValueError(f"{hidden} more findings are not shown yet. Fix the ones you can see and run the review again before submitting.")
     conn.execute("UPDATE content SET status='in_review' WHERE id=?", (c["id"],))
     audit(conn, c["id"], user["id"], "submitted", f"v{c['current_version']} with {len(open_findings(conn, c))} open findings")
     conn.commit()
