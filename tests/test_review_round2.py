@@ -130,3 +130,18 @@ def test_creating_the_app_does_not_leak_connections(tmp_path):
         warnings.simplefilter("error", ResourceWarning)
         create_app(str(tmp_path / "x.db"))
         gc.collect()
+
+
+# ---- emoji: the browser must slice by code point, as the server counts
+def test_highlight_slices_by_code_point_not_utf16(neha):
+    body = "😀😀 Hi Dude\r\nit's cheap"
+    _, d = review(neha, body)
+    chars = list(d["body"])  # what the page's Array.from(body) gives (the server stores \n line endings)
+    assert [("".join(chars[f["span_start"]:f["span_end"]])) for f in d["findings"]] == ["Dude", "cheap"]
+
+
+def test_ui_highlight_uses_code_points():
+    from pathlib import Path
+    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    hl = html[html.index("function highlight"):html.index("function jump")]
+    assert "Array.from(d.body)" in hl and "d.body.slice" not in hl
