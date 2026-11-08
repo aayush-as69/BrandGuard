@@ -1,6 +1,5 @@
 """Engine tests: seeded traps, citations, claim statuses, and rejection of fabricated AI output."""
 import json
-import sqlite3
 from pathlib import Path
 
 from brandguard import db, engine, kb, llm, retrieve

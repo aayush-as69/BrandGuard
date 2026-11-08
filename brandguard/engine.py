@@ -209,295 +209,306 @@ class ReviewResult:
     truncated: int = 0       # findings not shown because of MAX_FINDINGS
 
 
-def review(
-    kb: KB,
-    body: str,
-    images: list[dict],
-    judge: Optional[Callable[[str, KB, list[Finding]], tuple[list[Finding], str]]] = None,
-    inherited: Optional[list[Finding]] = None,
-) -> ReviewResult:
-    """`inherited` are AI suggestions from the previous version, re-located in this text, so applying
-    a fix does not send the content to the AI service again."""
-    res = ReviewResult()
-    raw: list[Finding] = []
-    sents = sentences(body)
+_PRICE = re.compile(r"(?<![A-Za-z])((?:₹|Rs\.?|INR)\s?)(\d(?:[\d,]*\d)?(?:\.\d+)?)")
+_RANKING = re.compile(
+    r"(?:(?<!\w)india['’]s\s+)?(?:#\s?1|(?<!\w)no\.?\s?1|(?<!\w)number\s+(?:one|1))(?!\d)"
+    r"(?:\s+(?!(?:is|are|was|were|in|on|at|for|of|to|by|and|or|with|among|since|that|the|a|an|as|but|from)\b)"
+    r"([a-z][a-z-]+))?", re.I)
+_SUPERLATIVE = re.compile(
+    r"\b(?:the\s+)?(?:best|finest|greatest|unmatched|unbeatable|world['’]s\s+[a-z]+est)\b|\b100\s?%", re.I)
+_SENTENCE_START = re.compile(r"(?:^|\n|[.!?][\"')\]]*[ \t]+)$")
 
-    def cited(check: str) -> Optional[str]:
+
+def _about(fact: dict, low: str, start: int, end: int) -> bool:
+    """The date at low[start:end] is the one the fact describes: one of the fact's words sits close by and
+    does not merely relate to it ("after the launch" is not the launch date)."""
+    for term in fact["data"].get("match", []):
+        for tm in re.finditer(re.escape(term), low):
+            gap = max(tm.start() - end, start - tm.end(), 0)
+            if gap <= NEAR and not _RELATIVE.search(low[:tm.start()]):
+                return True
+    return False
+
+
+def _money(amount: float) -> str:
+    return f"{amount:,.0f}" if amount.is_integer() else f"{amount:,.2f}"
+
+
+class _Review:
+    """One review run. Each check_* method looks for one kind of problem and appends findings to `raw`;
+    nothing is shown to anyone until `finish` has verified every finding against its source."""
+
+    def __init__(self, kb: KB, body: str, images: list[dict]) -> None:
+        self.kb, self.body, self.images = kb, body, images
+        self.sents = sentences(body)
+        self.res = ReviewResult()
+        self.raw: list[Finding] = []
+        self._seen_claims: set[tuple[str, str, str]] = set()
+        self.facts = {kind: [f for f in kb.facts if f["kind"] == kind] for kind in ("price", "date", "claim", "superlative")}
+
+    # -- helpers ---------------------------------------------------------------
+    def cited(self, check: str) -> Optional[str]:
         """Rule code a check cites; None (plus a warning) if the KB does not have it."""
-        cfg = kb.checks.get(check)
+        cfg = self.kb.checks.get(check)
         if not cfg:
             return None
         code = cfg.get("rule_code")
-        if code not in kb.rules:
-            res.warnings.append(f"Check '{check}' skipped: rule {code} is not in the knowledge base.")
+        if code not in self.kb.rules:
+            self.res.warnings.append(f"Check '{check}' skipped: rule {code} is not in the knowledge base.")
             return None
         return code
 
-    def guideline_finding(code: str, **kw) -> Finding:
-        return Finding(source_type="guideline", source_id=code, source_quote=kb.rules[code]["text"], **kw)
+    def guideline_finding(self, code: str, **kw) -> Finding:
+        return Finding(source_type="guideline", source_id=code, source_quote=self.kb.rules[code]["text"], **kw)
 
-    # 1. Glossary: banned terms and slang -------------------------------------
-    for g in kb.glossary:
-        code = g["rule_code"]
-        if code not in kb.rules:
-            res.warnings.append(f"Glossary term '{g['term']}' skipped: rule {code} is missing.")
-            continue
-        for m in re.finditer(rf"(?<![\w-]){re.escape(g['term'])}(?![\w-])", body, re.I):
-            tone = g["kind"] == "slang"
-            start, text = m.start(), m.group()
-            fix = match_case(text, g["preferred"])
-            # Keep "a"/"an" correct: "a cheap price" -> "an affordable price".
-            lead = max(0, start - 12)
-            art = re.search(r"\b(an?)(\s+)$", body[lead:start], re.I)
-            if art and fix[:1].isalpha():
-                want = "an" if fix[0].lower() in "aeiou" else "a"
-                if art.group(1).lower() != want:
-                    start = lead + art.start()
-                    text = body[start:m.end()]
-                    fix = f"{match_case(art.group(1), want)}{art.group(2)}{fix}"
-            raw.append(guideline_finding(
-                code,
-                category="tone" if tone else "terminology",
-                issue=(f"'{m.group()}' is {'off-tone slang' if tone else 'a banned term'}; "
-                       f"use '{g['preferred']}'." + (f" {g['note']}" if g.get("note") else "")),
-                span_text=text, span_start=start, span_end=m.end(),
-                severity="medium", confidence="high",
-                suggested_fix=fix,
+    @staticmethod
+    def fact_finding(fact: dict, **kw) -> Finding:
+        return Finding(source_type="fact", source_id=fact["code"], source_quote=fact["statement"], **kw)
+
+    def add_claim(self, text: str, status: str, source_id: str = "") -> None:
+        text = " ".join(text[:MAX_CLAIM_TEXT * 4].split())  # cut first: never normalise a huge sentence
+        if len(text) > MAX_CLAIM_TEXT:
+            text = text[:MAX_CLAIM_TEXT].rstrip() + "…"
+        if (text, status, source_id) not in self._seen_claims:
+            self._seen_claims.add((text, status, source_id))
+            self.res.claims.append({"text": text, "status": status, "source_id": source_id})
+
+    # -- 1. glossary: banned terms and slang -----------------------------------------
+    def check_glossary(self) -> None:
+        body = self.body
+        for g in self.kb.glossary:
+            code = g["rule_code"]
+            if code not in self.kb.rules:
+                self.res.warnings.append(f"Glossary term '{g['term']}' skipped: rule {code} is missing.")
+                continue
+            for m in re.finditer(rf"(?<![\w-]){re.escape(g['term'])}(?![\w-])", body, re.I):
+                tone = g["kind"] == "slang"
+                start, text = m.start(), m.group()
+                fix = match_case(text, g["preferred"])
+                # Keep "a"/"an" correct: "a cheap price" -> "an affordable price".
+                lead = max(0, start - 12)
+                art = re.search(r"\b(an?)(\s+)$", body[lead:start], re.I)
+                if art and fix[:1].isalpha():
+                    want = "an" if fix[0].lower() in "aeiou" else "a"
+                    if art.group(1).lower() != want:
+                        start = lead + art.start()
+                        text = body[start:m.end()]
+                        fix = f"{match_case(art.group(1), want)}{art.group(2)}{fix}"
+                self.raw.append(self.guideline_finding(
+                    code,
+                    category="tone" if tone else "terminology",
+                    issue=(f"'{m.group()}' is {'off-tone slang' if tone else 'a banned term'}; "
+                           f"use '{g['preferred']}'." + (f" {g['note']}" if g.get("note") else "")),
+                    span_text=text, span_start=start, span_end=m.end(),
+                    severity="medium", confidence="high", suggested_fix=fix,
+                ))
+
+    # -- 2. punctuation and emphasis ---------------------------------------------------
+    def check_exclamations(self) -> None:
+        code = self.cited("exclamation")
+        if not code:
+            return
+        limit = int(self.kb.checks["exclamation"].get("max", 1))
+        runs = list(re.finditer(r"!+", self.body))
+        if not runs or not (len(runs) > limit or len(runs[0].group()) > 1):
+            return
+        for i, m in enumerate(runs):
+            if i < limit and len(m.group()) == 1:
+                continue
+            self.raw.append(self.guideline_finding(
+                code, category="tone",
+                issue=f"Too many exclamation marks (the limit is {limit} per email).",
+                span_text=m.group(), span_start=m.start(), span_end=m.end(),
+                severity="low", confidence="high",
+                suggested_fix="!" if i < limit else ".",
             ))
 
-    # 2. Punctuation and emphasis -----------------------------------------------
-    code = cited("exclamation")
-    if code:
-        limit = int(kb.checks["exclamation"].get("max", 1))
-        runs = list(re.finditer(r"!+", body))
-        if runs and (len(runs) > limit or len(runs[0].group()) > 1):
-            for i, m in enumerate(runs):
-                if i < limit and len(m.group()) == 1:
-                    continue
-                keep = i < limit
-                raw.append(guideline_finding(
-                    code, category="tone",
-                    issue=f"Too many exclamation marks (the limit is {limit} per email).",
-                    span_text=m.group(), span_start=m.start(), span_end=m.end(),
-                    severity="low", confidence="high",
-                    suggested_fix="!" if keep else ".",
-                ))
-    code = cited("all_caps")
-    if code:
-        allow = set(kb.checks["all_caps"].get("allow", [])) | _ALWAYS_OK_CAPS
-        for m in re.finditer(r"\b[A-Z]{3,}\b", body):
+    def check_capitals(self) -> None:
+        code = self.cited("all_caps")
+        if not code:
+            return
+        allow = set(self.kb.checks["all_caps"].get("allow", [])) | _ALWAYS_OK_CAPS
+        for m in re.finditer(r"\b[A-Z]{3,}\b", self.body):
             if m.group() in allow:
                 continue
-            raw.append(guideline_finding(
+            self.raw.append(self.guideline_finding(
                 code, category="tone",
                 issue=f"'{m.group()}' is written in capitals for emphasis.",
                 span_text=m.group(), span_start=m.start(), span_end=m.end(),
                 severity="low", confidence="high", suggested_fix=m.group().capitalize(),
             ))
 
-    # 3. Claims and facts ---------------------------------------------------------
-    claims_code = cited("claims")
-    facts_code = cited("facts")
-    price_facts = [f for f in kb.facts if f["kind"] == "price"]
-    date_facts = [f for f in kb.facts if f["kind"] == "date"]
-    claim_facts = [f for f in kb.facts if f["kind"] == "claim"]
-    super_facts = [f for f in kb.facts if f["kind"] == "superlative"]
-
-    def fact_finding(fact: dict, **kw) -> Finding:
-        return Finding(source_type="fact", source_id=fact["code"], source_quote=fact["statement"], **kw)
-
-    seen_claims: set[tuple[str, str, str]] = set()
-
-    def add_claim(text: str, status: str, source_id: str = "") -> None:
-        text = " ".join(text[:MAX_CLAIM_TEXT * 4].split())  # cut first: never normalise a huge sentence
-        if len(text) > MAX_CLAIM_TEXT:
-            text = text[:MAX_CLAIM_TEXT].rstrip() + "…"
-        if (text, status, source_id) not in seen_claims:
-            seen_claims.add((text, status, source_id))
-            res.claims.append({"text": text, "status": status, "source_id": source_id})
-
-    if facts_code:
-        for off, sent in sents:
+    # -- 3. claims and approved facts ---------------------------------------------------
+    def check_facts(self) -> None:
+        """Prices, dates and descriptive facts are compared with the approved fact sheet."""
+        if not self.cited("facts"):
+            return
+        for off, sent in self.sents:
             low = sent.lower()
-            # prices
-            for m in re.finditer(r"(?<![A-Za-z])((?:₹|Rs\.?|INR)\s?)(\d(?:[\d,]*\d)?(?:\.\d+)?)", sent):
-                amount = float(m.group(2).replace(",", ""))
-                cands = [f for f in price_facts if any(t in low for t in f["data"].get("match", []))]
-                guessed = False
-                if not cands and len(price_facts) == 1:
-                    cands, guessed = price_facts, True  # nothing says which price this is
-                if not cands:
-                    add_claim(sent, "no_approved_source")
+            self._prices(off, sent, low)
+            self._dates(off, sent, low)
+            self._descriptive_facts(off, sent, low)
+
+    def _prices(self, off: int, sent: str, low: str) -> None:
+        price_facts = self.facts["price"]
+        for m in _PRICE.finditer(sent):
+            amount = float(m.group(2).replace(",", ""))
+            cands = [f for f in price_facts if any(t in low for t in f["data"].get("match", []))]
+            guessed = False
+            if not cands and len(price_facts) == 1:
+                cands, guessed = price_facts, True  # nothing says which price this is
+            if not cands:
+                self.add_claim(sent, "no_approved_source")
+                continue
+            fact = cands[0]
+            approved = float(fact["data"]["amount"])
+            shown = _money(approved)
+            span = dict(span_text=m.group(0), span_start=off + m.start(), span_end=off + m.end())
+            if amount == approved:
+                self.add_claim(sent, "supported", fact["code"])
+            elif guessed:
+                # "Free delivery above ₹999" is not the product price: ask a person, do not assert.
+                self.add_claim(sent, "no_approved_source")
+                self.raw.append(self.fact_finding(
+                    fact, category="fact", **span,
+                    issue=(f"{m.group(0)} is not an approved price. If it is the product price, "
+                           f"the approved price is {m.group(1)}{shown}."),
+                    severity="medium", confidence="low",
+                    fix_note="Check whether this amount refers to the product; no fix is applied automatically.",
+                ))
+            else:
+                self.add_claim(sent, "contradicted", fact["code"])
+                self.raw.append(self.fact_finding(
+                    fact, category="fact", **span,
+                    issue=f"Price is {m.group(0)} but the approved price is {m.group(1)}{shown}.",
+                    severity="high", confidence="high", suggested_fix=f"{m.group(1)}{shown}",
+                ))
+
+    def _dates(self, off: int, sent: str, low: str) -> None:
+        dates = find_dates(sent)
+        partial = find_partial_dates(sent, [(a, b) for a, b, _ in dates])
+        # (start, end, same_as_approved, confidence, shown_in_issue, fix_for) for every date found
+        found = [(a, b, lambda ap, d=d: d == ap, "high", fmt_date(d), fmt_date) for a, b, d in dates]
+        found += [(a, b, lambda ap, mo=mo, dy=dy: (mo, dy) == (ap.month, ap.day), "medium", sent[a:b],
+                   lambda ap: f"{ap.day} {MONTH_NAMES[ap.month - 1]}") for a, b, mo, dy in partial]
+        for start, end, same, confidence, shown, fix_for in found:
+            for fact in self.facts["date"]:
+                if not _about(fact, low, start, end):
                     continue
-                fact = cands[0]
-                approved = float(fact["data"]["amount"])
-                shown = f"{approved:,.0f}" if approved.is_integer() else f"{approved:,.2f}"
-                if amount == approved:
-                    add_claim(sent, "supported", fact["code"])
-                elif guessed:
-                    # "Free delivery above ₹999" is not the product price: ask a person, do not assert.
-                    add_claim(sent, "no_approved_source")
-                    raw.append(fact_finding(
-                        fact, category="fact",
-                        issue=(f"{m.group(0)} is not an approved price. If it is the product price, "
-                               f"the approved price is {m.group(1)}{shown}."),
-                        span_text=m.group(0), span_start=off + m.start(), span_end=off + m.end(),
-                        severity="medium", confidence="low",
-                        fix_note="Check whether this amount refers to the product; no fix is applied automatically.",
-                    ))
-                else:
-                    add_claim(sent, "contradicted", fact["code"])
-                    raw.append(fact_finding(
-                        fact, category="fact",
-                        issue=f"Price is {m.group(0)} but the approved price is {m.group(1)}{shown}.",
-                        span_text=m.group(0), span_start=off + m.start(), span_end=off + m.end(),
-                        severity="high", confidence="high", suggested_fix=f"{m.group(1)}{shown}",
-                    ))
-            # dates
-            def about(fact: dict, start: int, end: int) -> bool:
-                """The date is the one the fact describes: a matching word sits close by and does not
-                just relate to it ("after the launch" is not the launch date)."""
-                for t in fact["data"].get("match", []):
-                    for tm in re.finditer(re.escape(t), low):
-                        gap = max(tm.start() - end, start - tm.end(), 0)
-                        if gap <= NEAR and not _RELATIVE.search(low[:tm.start()]):
-                            return True
-                return False
+                approved = dt.date.fromisoformat(fact["data"]["date"])
+                if same(approved):
+                    self.add_claim(sent, "supported", fact["code"])
+                    continue
+                self.add_claim(sent, "contradicted", fact["code"])
+                self.raw.append(self.fact_finding(
+                    fact, category="fact",
+                    issue=f"Date is {shown} but the approved date is {fmt_date(approved)}.",
+                    span_text=sent[start:end], span_start=off + start, span_end=off + end,
+                    severity="high", confidence=confidence, suggested_fix=fix_for(approved),
+                ))
 
-            dates = find_dates(sent)
-            for start, end, d in dates:
-                for fact in date_facts:
-                    if not about(fact, start, end):
+    def _descriptive_facts(self, off: int, sent: str, low: str) -> None:
+        """Sourcing, roast and similar facts: wording that contradicts them, or wording that agrees."""
+        for fact in self.facts["claim"]:
+            data = fact["data"]
+            hit = False
+            # Spans of the approved wording, so "medium-dark roast" never trips "dark roast".
+            approved_spans = [(m.start(), m.end()) for k in data.get("keywords", [])
+                              for m in re.finditer(re.escape(k), sent, re.I)]
+            for bad in data.get("contradicts", []):
+                for m in re.finditer(rf"(?<![\w-]){re.escape(bad)}", sent, re.I):
+                    if any(s <= m.start() and m.end() <= e for s, e in approved_spans):
                         continue
-                    approved = dt.date.fromisoformat(fact["data"]["date"])
-                    if d == approved:
-                        add_claim(sent, "supported", fact["code"])
-                    else:
-                        add_claim(sent, "contradicted", fact["code"])
-                        raw.append(fact_finding(
-                            fact, category="fact",
-                            issue=f"Date is {fmt_date(d)} but the approved date is {fmt_date(approved)}.",
-                            span_text=sent[start:end], span_start=off + start, span_end=off + end,
-                            severity="high", confidence="high", suggested_fix=fmt_date(approved),
-                        ))
-            for start, end, month, day in find_partial_dates(sent, [(a, b) for a, b, _ in dates]):
-                for fact in date_facts:
-                    if not about(fact, start, end):
-                        continue
-                    approved = dt.date.fromisoformat(fact["data"]["date"])
-                    if (month, day) == (approved.month, approved.day):
-                        add_claim(sent, "supported", fact["code"])
-                    else:
-                        add_claim(sent, "contradicted", fact["code"])
-                        short = f"{approved.day} {MONTH_NAMES[approved.month - 1]}"
-                        raw.append(fact_finding(
-                            fact, category="fact",
-                            issue=f"Date is {sent[start:end]} but the approved date is {fmt_date(approved)}.",
-                            span_text=sent[start:end], span_start=off + start, span_end=off + end,
-                            severity="high", confidence="medium", suggested_fix=short,
-                        ))
-            # descriptive facts (sourcing, roast, ...)
-            for fact in claim_facts:
-                data = fact["data"]
-                hit = False
-                # Spans of the approved wording, so "medium-dark roast" never trips "dark roast".
-                approved_spans = [
-                    (m.start(), m.end())
-                    for k in data.get("keywords", [])
-                    for m in re.finditer(re.escape(k), sent, re.I)
-                ]
-                for bad in data.get("contradicts", []):
-                    for m in re.finditer(rf"(?<![\w-]){re.escape(bad)}", sent, re.I):
-                        if any(s <= m.start() and m.end() <= e for s, e in approved_spans):
-                            continue
-                        if _NEGATION.search(sent[:m.start()]):
-                            continue  # "not a light roast" agrees with the fact
-                        hit = True
-                        add_claim(sent, "contradicted", fact["code"])
-                        raw.append(fact_finding(
-                            fact, category="fact",
-                            issue=f"'{m.group()}' contradicts the approved fact: {fact['statement']}",
-                            span_text=m.group(), span_start=off + m.start(), span_end=off + m.end(),
-                            severity="high", confidence="high",
-                            suggested_fix=data.get("fix"),
-                        ))
-                if not hit and any(k in low for k in data.get("keywords", [])):
-                    add_claim(sent, "supported", fact["code"])
+                    if _NEGATION.search(sent[:m.start()]):
+                        continue  # "not a light roast" agrees with the fact
+                    hit = True
+                    self.add_claim(sent, "contradicted", fact["code"])
+                    self.raw.append(self.fact_finding(
+                        fact, category="fact",
+                        issue=f"'{m.group()}' contradicts the approved fact: {fact['statement']}",
+                        span_text=m.group(), span_start=off + m.start(), span_end=off + m.end(),
+                        severity="high", confidence="high", suggested_fix=data.get("fix"),
+                    ))
+            if not hit and any(k in low for k in data.get("keywords", [])):
+                self.add_claim(sent, "supported", fact["code"])
 
-    if claims_code:
-        rank = re.compile(
-            r"(?:(?<!\w)india['’]s\s+)?(?:#\s?1|(?<!\w)no\.?\s?1|(?<!\w)number\s+(?:one|1))(?!\d)"
-            r"(?:\s+(?!(?:is|are|was|were|in|on|at|for|of|to|by|and|or|with|among|since|that|the|a|an|as|but|from)\b)"
-            r"([a-z][a-z-]+))?", re.I)
-        generic = re.compile(
-            r"\b(?:the\s+)?(?:best|finest|greatest|unmatched|unbeatable|world['’]s\s+[a-z]+est)\b|\b100\s?%", re.I)
-        for off, sent in sents:
+    def check_claims(self) -> None:
+        """Rankings ("#1") and superlatives need an approved source."""
+        code = self.cited("claims")
+        if not code:
+            return
+        super_facts = self.facts["superlative"]
+        for off, sent in self.sents:
             low = sent.lower()
             if any(p.lower() in low for f in super_facts for p in f["data"].get("phrases", [])):
-                add_claim(sent, "supported", next(f["code"] for f in super_facts))
+                self.add_claim(sent, "supported", super_facts[0]["code"])
                 continue
             taken: list[tuple[int, int]] = []
-            for m in rank.finditer(sent):
+            for m in _RANKING.finditer(sent):
                 taken.append((m.start(), m.end()))
                 noun = m.group(1)
-                add_claim(sent, "no_approved_source")
-                raw.append(guideline_finding(
-                    claims_code, category="claim",
+                self.add_claim(sent, "no_approved_source")
+                self.raw.append(self.guideline_finding(
+                    code, category="claim",
                     issue=f"'{m.group().strip()}' is a ranking claim with no approved source.",
                     span_text=m.group(), span_start=off + m.start(), span_end=off + m.end(),
                     severity="high", confidence="high",
                     suggested_fix=f"our {noun}" if noun else None,
                     fix_note="Remove or reword unless an approved source is added to the fact sheet.",
                 ))
-            for m in generic.finditer(sent):
+            for m in _SUPERLATIVE.finditer(sent):
                 if any(s <= m.start() < e for s, e in taken):
                     continue
-                add_claim(sent, "no_approved_source")
-                raw.append(guideline_finding(
-                    claims_code, category="claim",
+                self.add_claim(sent, "no_approved_source")
+                self.raw.append(self.guideline_finding(
+                    code, category="claim",
                     issue=f"'{m.group().strip()}' is a superlative claim with no approved source.",
                     span_text=m.group(), span_start=off + m.start(), span_end=off + m.end(),
                     severity="medium", confidence="medium",
                     fix_note="Reword without the superlative, or add an approved source to the fact sheet.",
                 ))
 
-    # 4. Images and accessibility ---------------------------------------------------
-    code = cited("alt_text")
-    if code:
-        lo = int(kb.checks["alt_text"].get("min_len", 5))
-        hi = int(kb.checks["alt_text"].get("max_len", 125))
-        for img in images:
+    # -- 4. images and accessibility -----------------------------------------------------
+    def check_alt_text(self) -> None:
+        code = self.cited("alt_text")
+        if not code:
+            return
+        lo = int(self.kb.checks["alt_text"].get("min_len", 5))
+        hi = int(self.kb.checks["alt_text"].get("max_len", 125))
+        for img in self.images:
             name, alt = img.get("name", "image"), (img.get("alt") or "").strip()
+            where = dict(category="accessibility", span_text=name, target=f"image.alt:{name}")
             if len(alt) < lo:
-                raw.append(guideline_finding(
-                    code, category="accessibility",
+                self.raw.append(self.guideline_finding(
+                    code, **where,
                     issue=f"Image '{name}' has no usable alt text." if not alt
                     else f"Alt text for '{name}' is too short ({len(alt)} characters, minimum {lo}).",
-                    span_text=name, target=f"image.alt:{name}",
                     severity="high", confidence="high",
                     fix_note="Describe what the image shows in one short sentence.",
                 ))
             elif len(alt) > hi:
-                raw.append(guideline_finding(
-                    code, category="accessibility",
+                self.raw.append(self.guideline_finding(
+                    code, **where,
                     issue=f"Alt text for '{name}' is too long ({len(alt)} characters, maximum {hi}).",
-                    span_text=name, target=f"image.alt:{name}",
                     severity="low", confidence="high", fix_note="Shorten the description.",
                 ))
-    code = cited("contrast")
-    if code:
-        need = float(kb.checks["contrast"].get("min_ratio", 4.5))
-        for img in images:
+
+    def check_contrast(self) -> None:
+        code = self.cited("contrast")
+        if not code:
+            return
+        need = float(self.kb.checks["contrast"].get("min_ratio", 4.5))
+        for img in self.images:
             fg, bg = img.get("text_color"), img.get("bg_color")
             if not fg or not bg:
                 continue
             ratio = contrast_ratio(fg, bg)
             if ratio is None:
-                res.warnings.append(f"Contrast for '{img.get('name')}' not checked: invalid colour value.")
+                self.res.warnings.append(f"Contrast for '{img.get('name')}' not checked: invalid colour value.")
                 continue
             if ratio < need:
                 name = img.get("name", "image")
-                raw.append(guideline_finding(
+                self.raw.append(self.guideline_finding(
                     code, category="accessibility",
                     issue=f"Text on '{name}' has contrast {ratio:.1f}:1 ({fg} on {bg}); the minimum is {need}:1.",
                     span_text=name, target=f"image.text_color:{name}",
@@ -506,29 +517,31 @@ def review(
                     fix_note="Suggested colour is the closest shade that passes.",
                 ))
 
-    # A fix that lands at the start of a sentence starts with a capital letter.
-    sentence_start = re.compile(r"(?:^|\n|[.!?][\"')\]]*[ \t]+)$")
-    for f in raw:
-        fix = f.suggested_fix
-        if (f.target == "body" and fix and f.span_start >= 0 and fix[0].isalpha() and fix[0].islower()
-                and sentence_start.search(body[max(0, f.span_start - 40):f.span_start])):
-            f.suggested_fix = fix[0].upper() + fix[1:]
+    # -- 5. finishing: tidy fixes, verify, add AI suggestions, order, cap ---------------------
+    def capitalise_fixes(self) -> None:
+        """A fix that lands at the start of a sentence starts with a capital letter."""
+        for f in self.raw:
+            fix = f.suggested_fix
+            if (f.target == "body" and fix and f.span_start >= 0 and fix[0].isalpha() and fix[0].islower()
+                    and _SENTENCE_START.search(self.body[max(0, f.span_start - 40):f.span_start])):
+                f.suggested_fix = fix[0].upper() + fix[1:]
 
-    # 5. Verify everything, then optionally ask the grounded LLM judge --------------
-    for f in raw:
-        reason = verify(f, kb, body, images)
-        (res.rejected.append(f"{f.issue} ({reason})") if reason else res.findings.append(f))
+    def verify_rule_findings(self) -> None:
+        for f in self.raw:
+            reason = verify(f, self.kb, self.body, self.images)
+            (self.res.rejected.append(f"{f.issue} ({reason})") if reason else self.res.findings.append(f))
 
-    extra: list[Finding] = list(inherited or [])
-    if extra:
-        res.llm_status = f"{len(extra)} earlier AI suggestion(s) carried over; content was not re-sent"
-    if judge:
-        got, status = judge(body, kb, list(res.findings))
-        res.llm_status = status
-        extra += got
-    if extra:
+    def add_ai_findings(self, judge, inherited: Optional[list[Finding]]) -> None:
+        res = self.res
+        extra: list[Finding] = list(inherited or [])
+        if extra:
+            res.llm_status = f"{len(extra)} earlier AI suggestion(s) carried over; content was not re-sent"
+        if judge:
+            got, status = judge(self.body, self.kb, list(res.findings))
+            res.llm_status = status
+            extra += got
         for f in extra:
-            reason = verify(f, kb, body, images)
+            reason = verify(f, self.kb, self.body, self.images)
             if reason:
                 res.rejected.append(f"[AI] {f.issue} ({reason})")
             elif any(f.span_start < o.span_end and o.span_start < f.span_end
@@ -537,11 +550,33 @@ def review(
             else:
                 res.findings.append(f)
 
-    res.findings.sort(key=lambda f: (f.span_start if f.span_start >= 0 else 10**9, f.issue))
-    if len(res.findings) > MAX_FINDINGS:
-        res.truncated = len(res.findings) - MAX_FINDINGS
-        res.findings = res.findings[:MAX_FINDINGS]
-        res.warnings.append(
-            f"{res.truncated} more findings are not shown (limit {MAX_FINDINGS}). "
-            "Fix these, then run the review again to see the rest.")
-    return res
+    def finish(self) -> ReviewResult:
+        res = self.res
+        res.findings.sort(key=lambda f: (f.span_start if f.span_start >= 0 else 10**9, f.issue))
+        if len(res.findings) > MAX_FINDINGS:
+            res.truncated = len(res.findings) - MAX_FINDINGS
+            res.findings = res.findings[:MAX_FINDINGS]
+            res.warnings.append(
+                f"{res.truncated} more findings are not shown (limit {MAX_FINDINGS}). "
+                "Fix these, then run the review again to see the rest.")
+        return res
+
+
+def review(
+    kb: KB,
+    body: str,
+    images: list[dict],
+    judge: Optional[Callable[[str, KB, list[Finding]], tuple[list[Finding], str]]] = None,
+    inherited: Optional[list[Finding]] = None,
+) -> ReviewResult:
+    """Run every check, verify each finding against its source, then optionally add AI suggestions.
+    `inherited` are AI suggestions from the previous version, re-located in this text, so applying
+    a fix does not send the content to the AI service again."""
+    r = _Review(kb, body, images)
+    for check in (r.check_glossary, r.check_exclamations, r.check_capitals, r.check_facts,
+                  r.check_claims, r.check_alt_text, r.check_contrast):
+        check()
+    r.capitalise_fixes()
+    r.verify_rule_findings()
+    r.add_ai_findings(judge, inherited)
+    return r.finish()

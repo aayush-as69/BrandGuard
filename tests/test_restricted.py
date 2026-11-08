@@ -1,5 +1,5 @@
 """Agency users and internal creators must not learn restricted facts through findings, fixes or records."""
-from conftest import ARJUN, IRA, NEHA, RAHUL
+from conftest import ARJUN, NEHA, RAHUL
 
 
 def _draft(login, who, body="We launch on 20 December. Our 250g pouch is Rs. 399."):

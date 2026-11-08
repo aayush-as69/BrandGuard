@@ -144,65 +144,64 @@ def permissions(conn, user: dict, c: dict) -> dict:
 
 
 # ---------------------------------------------------------------------- review
-def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, ai: str = "fresh") -> dict:
-    """(Re)review the current version. Dismissals made earlier on the same issue carry over.
+class _Dismissals:
+    """Remembers earlier dismissals so a person's decision survives a re-review. A dismissal is matched by
+    rule, flagged text, category and the words around it within the same sentence, so it covers that spot
+    and not every identical word elsewhere."""
 
-    ai="fresh": ask the AI judge (it sees the content).  ai="inherit": do NOT contact the AI;
-    suggestions it made on the previous version are re-located in the new text and kept."""
-    c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
-    v = current(conn, c)
-    ver = c["current_version"]
-    previous = [dict(r) for r in conn.execute(
-        "SELECT * FROM findings WHERE content_id=? AND decision='dismissed'", (content_id,))]
-    bodies: dict[int, str] = {}
+    def __init__(self, conn, content_id: int) -> None:
+        self.conn, self.content_id = conn, content_id
+        self._bodies: dict[int, str] = {}
+        self._carry = {}
+        for p in conn.execute("SELECT * FROM findings WHERE content_id=? AND decision='dismissed'", (content_id,)):
+            p = dict(p)
+            near = self.context(p["version"], p["span_start"], p["span_end"]) if p["target"] == "body" else ("", "")
+            self._carry[(p["source_id"], p["span_text"], p["category"], *near)] = p
 
-    def context(version: int, start: int, end: int) -> tuple[str, str]:
-        """A little text either side, so a dismissal covers this spot and not every identical word."""
-        if version not in bodies:
-            bodies[version] = version_row(conn, content_id, version)["body"]
-        b = bodies[version]
+    def context(self, version: int, start: int, end: int) -> tuple[str, str]:
+        if version not in self._bodies:
+            self._bodies[version] = version_row(self.conn, self.content_id, version)["body"]
+        b = self._bodies[version]
         before = re.split(r"[.!?\n]", b[max(0, start - CONTEXT):start])[-1]   # same sentence only, so an
         after = re.split(r"[.!?\n]", b[end:end + CONTEXT])[0]                 # edit next door changes nothing
         return " ".join(before.split()), " ".join(after.split())
 
-    carry = {}
-    for p in previous:
-        if p["target"] == "body":
-            key = (p["source_id"], p["span_text"], p["category"], *context(p["version"], p["span_start"], p["span_end"]))
-        else:
-            key = (p["source_id"], p["span_text"], p["category"], "", "")
-        carry[key] = p
+    def earlier(self, f: Finding, version: int) -> Optional[dict]:
+        """The dismissal that covers finding `f` of `version`, if a person already made one."""
+        near = self.context(version, f.span_start, f.span_end) if f.target == "body" else ("", "")
+        return self._carry.get((f.source_id, f.span_text, f.category, *near))
 
-    inherited: list[Finding] = []
-    if ai == "inherit" and ver > 1:
-        for r in conn.execute(
-                "SELECT * FROM findings WHERE content_id=? AND version=? AND ai_generated=1 "
-                "AND target='body' AND decision IN ('open','dismissed')", (content_id, ver - 1)):
-            start = v["body"].find(r["span_text"]) if r["span_text"] else -1
-            if start < 0:
-                continue  # the flagged text is gone, so the suggestion no longer applies
-            try:
-                inherited.append(Finding(
-                    category=r["category"], issue=r["issue"], span_text=r["span_text"], span_start=start,
-                    span_end=start + len(r["span_text"]), target="body", source_type=r["source_type"],
-                    source_id=r["source_id"], source_quote=r["source_quote"], severity=r["severity"],
-                    confidence=r["confidence"], suggested_fix=r["suggested_fix"], fix_note=r["fix_note"],
-                    ai_generated=True))
-            except Exception:
-                continue
-    judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
-    result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
-    if ai == "inherit" and not inherited:
-        previous = json.loads(version_row(conn, content_id, ver - 1)["review_meta"]).get("llm_status", "") if ver > 1 else ""
-        result.llm_status = ("not re-run for this change (content was not re-sent)"
-                             if previous.startswith(("used", "not re-run")) else "not used")
 
+def _inherited_ai_findings(conn, content_id: int, ver: int, body: str) -> list[Finding]:
+    """AI suggestions from the previous version, re-located in this text (the AI is not contacted again)."""
+    out: list[Finding] = []
+    if ver <= 1:
+        return out
+    for r in conn.execute(
+            "SELECT * FROM findings WHERE content_id=? AND version=? AND ai_generated=1 "
+            "AND target='body' AND decision IN ('open','dismissed')", (content_id, ver - 1)):
+        start = body.find(r["span_text"]) if r["span_text"] else -1
+        if start < 0:
+            continue  # the flagged text is gone, so the suggestion no longer applies
+        try:
+            out.append(Finding(
+                category=r["category"], issue=r["issue"], span_text=r["span_text"], span_start=start,
+                span_end=start + len(r["span_text"]), target="body", source_type=r["source_type"],
+                source_id=r["source_id"], source_quote=r["source_quote"], severity=r["severity"],
+                confidence=r["confidence"], suggested_fix=r["suggested_fix"], fix_note=r["fix_note"],
+                ai_generated=True))
+        except Exception:
+            continue
+    return out
+
+
+def _store_review(conn, content_id: int, ver: int, result, dismissals: _Dismissals) -> int:
+    """Replace this version's findings and claims with `result`. Returns how many dismissals were carried over."""
     conn.execute("DELETE FROM findings WHERE content_id=? AND version=?", (content_id, ver))
     conn.execute("DELETE FROM claims WHERE content_id=? AND version=?", (content_id, ver))
     carried = 0
     for f in result.findings:
-        near = context(ver, f.span_start, f.span_end) if f.target == "body" else ("", "")
-        old = carry.get((f.source_id, f.span_text, f.category, *near))
+        old = dismissals.earlier(f, ver)
         decision = ("dismissed", f"(carried over) {old['decision_reason']}", old["decided_by"], old["decided_at"]) \
             if old else ("open", "", None, None)
         carried += 1 if old else 0
@@ -220,6 +219,28 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
             "INSERT INTO claims(content_id, version, text, status, source_id) VALUES (?,?,?,?,?)",
             (content_id, ver, cl["text"], cl["status"], cl["source_id"]),
         )
+    return carried
+
+
+def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, ai: str = "fresh") -> dict:
+    """(Re)review the current version. Dismissals made earlier on the same issue carry over.
+
+    ai="fresh": ask the AI judge (it sees the content).  ai="inherit": do NOT contact the AI;
+    suggestions it made on the previous version are re-located in the new text and kept."""
+    c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
+    v = current(conn, c)
+    ver = c["current_version"]
+    dismissals = _Dismissals(conn, content_id)
+
+    inherited = _inherited_ai_findings(conn, content_id, ver, v["body"]) if ai == "inherit" else []
+    judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
+    result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
+    if ai == "inherit" and not inherited:
+        before = json.loads(version_row(conn, content_id, ver - 1)["review_meta"]).get("llm_status", "") if ver > 1 else ""
+        result.llm_status = ("not re-run for this change (content was not re-sent)"
+                             if before.startswith(("used", "not re-run")) else "not used")
+
+    carried = _store_review(conn, content_id, ver, result, dismissals)
     meta = {"warnings": result.warnings, "rejected": result.rejected, "llm_status": result.llm_status,
             "truncated": result.truncated}
     conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
@@ -302,8 +323,50 @@ def revise(conn, user: dict, content_id: int, body: str, images: list[dict],
 
 
 # -------------------------------------------------------------------- decisions
+def _dismiss(conn, user: dict, c: dict, f: dict, perms: dict, reason: Optional[str]) -> dict:
+    reason = _text(reason, "Reason", MAX_FIELD).strip()
+    if not reason:
+        raise ValueError("A reason is required to dismiss a finding")
+    if (f["category"] in RISKY or f["needs_reviewer"]) and not perms["can_dismiss_risky"]:
+        raise Forbidden("Only a manager or reviewer can dismiss fact, claim or low-confidence findings")
+    if not conn.execute(
+            "UPDATE findings SET decision='dismissed', decision_reason=?, decided_by=?, decided_at=? "
+            "WHERE id=? AND decision='open'", (reason, user["id"], now(), f["id"])).rowcount:
+        raise ValueError("Someone else already decided this finding")
+    audit(conn, c["id"], user["id"], "finding_dismissed", f"#{f['id']} {f['source_id']}: {reason}")
+    conn.commit()
+    return {"decision": "dismissed", "new_version": None}
+
+
+def _apply(f: dict, replacement: str, body: str, images: list[dict]) -> tuple[str, list[dict], str]:
+    """Put `replacement` where the finding points: into the text, or into an image's alt text or colour.
+    Returns the new body, the new images and the (cleaned) replacement."""
+    if f["target"] == "body":
+        s, e = f["span_start"], f["span_end"]
+        if body[s:e] != f["span_text"]:
+            raise ValueError("The content changed since this review. Re-run the review first.")
+        body = body[:s] + replacement + body[e:]
+        if not body.strip():
+            raise ValueError("That change would leave the content empty")
+        return body, images, replacement
+    field, name = f["target"].split(":", 1)
+    img = next((i for i in images if i["name"] == name), None)
+    if not img:
+        raise ValueError("Image no longer exists in this version")
+    if field == "image.alt":
+        replacement = replacement.strip()
+        img["alt"] = replacement
+    else:
+        replacement = _colour(replacement, "Colour")
+        img["text_color"] = replacement
+    if not replacement:
+        raise ValueError("Provide the replacement text")
+    return body, images, replacement
+
+
 def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] = None,
            reason: Optional[str] = None, judge_factory: Optional[Callable] = None) -> dict:
+    """Accept the suggested fix, edit it, or dismiss the finding. Accept and edit create a new version."""
     row = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
     if not row:
         raise NotFound("Finding not found")
@@ -320,20 +383,8 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         raise ValueError("This finding already has a decision")
     if action not in ("accept", "edit", "dismiss"):
         raise ValueError("action must be accept, edit or dismiss")
-
     if action == "dismiss":
-        reason = _text(reason, "Reason", MAX_FIELD).strip()
-        if not reason:
-            raise ValueError("A reason is required to dismiss a finding")
-        if (f["category"] in RISKY or f["needs_reviewer"]) and not perms["can_dismiss_risky"]:
-            raise Forbidden("Only a manager or reviewer can dismiss fact, claim or low-confidence findings")
-        if not conn.execute(
-                "UPDATE findings SET decision='dismissed', decision_reason=?, decided_by=?, decided_at=? "
-                "WHERE id=? AND decision='open'", (reason, user["id"], now(), finding_id)).rowcount:
-            raise ValueError("Someone else already decided this finding")
-        audit(conn, c["id"], user["id"], "finding_dismissed", f"#{finding_id} {f['source_id']}: {reason}")
-        conn.commit()
-        return {"decision": "dismissed", "new_version": None}
+        return _dismiss(conn, user, c, f, perms, reason)
 
     if action == "accept":
         if is_restricted(f, visible_facts(conn, user)):
@@ -346,27 +397,7 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
             raise ValueError("Provide the replacement text")
         replacement = _text(text, "Replacement", 2000)
     v = current(conn, c)
-    body, images = v["body"], [dict(i) for i in v["images"]]
-    if f["target"] == "body":
-        s, e = f["span_start"], f["span_end"]
-        if body[s:e] != f["span_text"]:
-            raise ValueError("The content changed since this review. Re-run the review first.")
-        body = body[:s] + replacement + body[e:]
-        if not body.strip():
-            raise ValueError("That change would leave the content empty")
-    else:
-        field, name = f["target"].split(":", 1)
-        img = next((i for i in images if i["name"] == name), None)
-        if not img:
-            raise ValueError("Image no longer exists in this version")
-        if field == "image.alt":
-            replacement = replacement.strip()
-            img["alt"] = replacement
-        else:
-            replacement = _colour(replacement, "Colour")
-            img["text_color"] = replacement
-        if not replacement:
-            raise ValueError("Provide the replacement text")
+    body, images, replacement = _apply(f, replacement, v["body"], [dict(i) for i in v["images"]])
     verb = "accepted" if action == "accept" else "edited"
     if not conn.execute(
             "UPDATE findings SET decision=?, decision_text=?, decided_by=?, decided_at=? "

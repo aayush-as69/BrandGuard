@@ -1,4 +1,4 @@
-"""Second code review: false positives, dismissal scope, size limits, imports."""
+"""Regression tests from code review: false positives, dismissal scope, size limits, imports, AI parsing."""
 import io
 import json
 
@@ -142,8 +142,8 @@ def test_highlight_slices_by_code_point_not_utf16(neha):
 
 def test_ui_highlight_uses_code_points():
     from pathlib import Path
-    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
-    hl = html[html.index("function highlight"):html.index("function jump")]
+    js = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(encoding="utf-8")
+    hl = js[js.index("function highlight"):js.index("function jump")]
     assert "Array.from(d.body)" in hl and "d.body.slice" not in hl
 
 
