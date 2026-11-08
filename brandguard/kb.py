@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from .db import now
+from .errors import NotFound
 
 ACCESS_LEVELS = {"public": 0, "internal": 1, "confidential": 2}
 
@@ -99,36 +100,43 @@ def import_guidelines(conn: sqlite3.Connection, title: str, text: str, access_le
     return {"guideline_id": gid, "rules": len(rules)}
 
 
+def _check_fact(f: dict) -> dict:
+    """Validate one fact (shared by import and edit). Returns the data object."""
+    if not isinstance(f, dict):
+        raise ValueError("Each fact must be an object")
+    for key in ("code", "kind", "statement"):
+        if not f.get(key):
+            raise ValueError(f"Fact is missing '{key}': {f}")
+    if f["kind"] not in {"price", "date", "claim", "superlative"}:
+        raise ValueError(f"Unknown fact kind '{f['kind']}'")
+    data = f.get("data", {})
+    if not isinstance(data, dict):
+        raise ValueError(f"Fact {f['code']}: 'data' must be an object")
+    if f["kind"] == "price" and (isinstance(data.get("amount"), bool) or not isinstance(data.get("amount"), (int, float))):
+        raise ValueError(f"Fact {f['code']}: a price fact needs a numeric data.amount")
+    if f["kind"] == "date":
+        try:
+            dt.date.fromisoformat(str(data.get("date")))
+        except ValueError:
+            raise ValueError(f"Fact {f['code']}: a date fact needs data.date as YYYY-MM-DD") from None
+    for key in ("match", "keywords", "contradicts", "phrases"):
+        if key in data and not (isinstance(data[key], list) and all(isinstance(x, str) for x in data[key])):
+            raise ValueError(f"Fact {f['code']}: data.{key} must be a list of text")
+    _check_level(f.get("access_level", "internal"))
+    return data
+
+
 def import_facts(conn: sqlite3.Connection, facts: list[dict]) -> int:
     """Each fact: code, kind (price|date|claim|superlative), statement, plus kind-specific data."""
     for f in facts:
-        if not isinstance(f, dict):
-            raise ValueError("Each fact must be an object")
-        for key in ("code", "kind", "statement"):
-            if not f.get(key):
-                raise ValueError(f"Fact is missing '{key}': {f}")
-        if f["kind"] not in {"price", "date", "claim", "superlative"}:
-            raise ValueError(f"Unknown fact kind '{f['kind']}'")
-        data = f.get("data", {})
-        if not isinstance(data, dict):
-            raise ValueError(f"Fact {f['code']}: 'data' must be an object")
+        data = _check_fact(f)
         if conn.execute("SELECT 1 FROM facts WHERE code=?", (f["code"],)).fetchone():
             raise ValueError(f"Fact {f['code']} already exists")
-        if f["kind"] == "price" and not isinstance(data.get("amount"), (int, float)):
-            raise ValueError(f"Fact {f['code']}: a price fact needs a numeric data.amount")
-        if f["kind"] == "date":
-            try:
-                dt.date.fromisoformat(str(data.get("date")))
-            except ValueError:
-                raise ValueError(f"Fact {f['code']}: a date fact needs data.date as YYYY-MM-DD") from None
-        for key in ("match", "keywords", "contradicts", "phrases"):
-            if key in data and not (isinstance(data[key], list) and all(isinstance(x, str) for x in data[key])):
-                raise ValueError(f"Fact {f['code']}: data.{key} must be a list of text")
         conn.execute(
             "INSERT INTO facts(code, kind, statement, data, source, access_level) VALUES (?,?,?,?,?,?)",
             (
                 f["code"], f["kind"], f["statement"], json.dumps(data),
-                f.get("source", ""), _check_level(f.get("access_level", "internal")),
+                f.get("source", ""), f.get("access_level", "internal"),
             ),
         )
     conn.commit()
@@ -207,3 +215,125 @@ def seed_demo(conn: sqlite3.Connection, seed_dir: Path) -> dict:
     out["assets"] = import_assets(conn, json.loads((seed_dir / "assets.json").read_text(encoding="utf-8")))
     out["settings"] = import_settings(conn, json.loads((seed_dir / "settings.json").read_text(encoding="utf-8")))
     return out
+
+
+# ----------------------------------------------------------- edit and delete one item
+def _row(conn, table: str, key: str, value):
+    row = conn.execute(f"SELECT * FROM {table} WHERE {key}=?", (value,)).fetchone()
+    if not row:
+        raise NotFound(f"No such {table[:-1] if table.endswith('s') else table}")
+    return dict(row)
+
+
+def _str(patch: dict, key: str, current: str, limit: int = 4000) -> str:
+    if key not in patch:
+        return current
+    v = patch[key]
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError(f"'{key}' must be non-empty text")
+    if len(v) > limit:
+        raise ValueError(f"'{key}' is too long (maximum {limit} characters)")
+    return v.strip()
+
+
+def _text_or_blank(v, key: str, limit: int) -> str:
+    if not isinstance(v, str) or len(v) > limit:
+        raise ValueError(f"'{key}' must be text of at most {limit} characters")
+    return v.strip()
+
+
+def _need_patch(patch) -> dict:
+    if not isinstance(patch, dict) or not patch:
+        raise ValueError("Send the fields to change as a JSON object")
+    return patch
+
+
+def update_rule(conn, code: str, patch: dict) -> None:
+    patch = _need_patch(patch)
+    r = _row(conn, "rules", "code", code)
+    conn.execute("UPDATE rules SET title=?, text=? WHERE code=?",
+                 (_str(patch, "title", r["title"], 200), _str(patch, "text", r["text"]), code))
+    conn.commit()
+
+
+def references_to_rule(conn, code: str) -> list[str]:
+    refs = [f"glossary term '{g['term']}'" for g in conn.execute("SELECT term FROM glossary WHERE rule_code=?", (code,))]
+    row = conn.execute("SELECT value FROM settings WHERE key='rule_checks'").fetchone()
+    if row:
+        refs += [f"the '{name}' check" for name, cfg in json.loads(row["value"]).items() if cfg.get("rule_code") == code]
+    return refs
+
+
+def delete_rule(conn, code: str) -> None:
+    _row(conn, "rules", "code", code)
+    refs = references_to_rule(conn, code)
+    if refs:
+        raise ValueError(f"Rule {code} is still used by {', '.join(refs[:5])}{' and more' if len(refs) > 5 else ''}. "
+                         "Change or remove those first.")
+    conn.execute("DELETE FROM rules WHERE code=?", (code,))
+    conn.commit()
+
+
+def update_fact(conn, code: str, patch: dict) -> None:
+    patch = _need_patch(patch)
+    if "code" in patch or "kind" in patch:
+        raise ValueError("A fact's code and kind cannot be changed. Delete it and add a new one.")
+    cur = _row(conn, "facts", "code", code)
+    merged = {
+        "code": code, "kind": cur["kind"],
+        "statement": _str(patch, "statement", cur["statement"]),
+        "source": cur["source"] if "source" not in patch else _text_or_blank(patch["source"], "source", 500),
+        "access_level": patch.get("access_level", cur["access_level"]),
+        "data": patch.get("data", json.loads(cur["data"])),
+    }
+    data = _check_fact(merged)
+    conn.execute("UPDATE facts SET statement=?, data=?, source=?, access_level=? WHERE code=?",
+                 (merged["statement"], json.dumps(data), merged["source"], merged["access_level"], code))
+    conn.commit()
+
+
+def delete_fact(conn, code: str) -> None:
+    _row(conn, "facts", "code", code)
+    conn.execute("DELETE FROM facts WHERE code=?", (code,))
+    conn.commit()
+
+
+def update_glossary(conn, gid: int, patch: dict) -> None:
+    patch = _need_patch(patch)
+    g = _row(conn, "glossary", "id", gid)
+    rule = patch.get("rule_code", g["rule_code"])
+    if not conn.execute("SELECT 1 FROM rules WHERE code=?", (rule,)).fetchone():
+        raise ValueError(f"Rule {rule} is not in the knowledge base")
+    kind = patch.get("kind", g["kind"])
+    if kind not in ("banned", "slang"):
+        raise ValueError("kind must be 'banned' or 'slang'")
+    note = patch.get("note", g["note"])
+    if not isinstance(note, str):
+        raise ValueError("'note' must be text")
+    conn.execute("UPDATE glossary SET term=?, preferred=?, kind=?, rule_code=?, note=? WHERE id=?",
+                 (_str(patch, "term", g["term"], 200), _str(patch, "preferred", g["preferred"], 200), kind, rule, note[:500], gid))
+    conn.commit()
+
+
+def delete_glossary(conn, gid: int) -> None:
+    _row(conn, "glossary", "id", gid)
+    conn.execute("DELETE FROM glossary WHERE id=?", (gid,))
+    conn.commit()
+
+
+def update_asset(conn, aid: int, patch: dict) -> None:
+    patch = _need_patch(patch)
+    a = _row(conn, "assets", "id", aid)
+    note = patch.get("note", a["note"])
+    if not isinstance(note, str):
+        raise ValueError("'note' must be text")
+    conn.execute("UPDATE assets SET name=?, kind=?, note=?, access_level=? WHERE id=?",
+                 (_str(patch, "name", a["name"], 200), _str(patch, "kind", a["kind"], 100), note[:500],
+                  _check_level(patch.get("access_level", a["access_level"])), aid))
+    conn.commit()
+
+
+def delete_asset(conn, aid: int) -> None:
+    _row(conn, "assets", "id", aid)
+    conn.execute("DELETE FROM assets WHERE id=?", (aid,))
+    conn.commit()

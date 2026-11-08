@@ -32,6 +32,11 @@
   .btn.warn{background:#fff;border-color:var(--amber);color:var(--amber)}
   .btn.bad{background:#fff;border-color:var(--red);color:var(--red)}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #tour{position:fixed;right:16px;bottom:16px;width:min(360px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:14px 16px;box-shadow:0 8px 30px rgba(15,23,42,.18);z-index:20}
+  #tour .row{display:flex;gap:8px;flex-wrap:wrap}#tour p{margin:6px 0 10px}
+  .nowrap{white-space:nowrap}.tiles{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}.tile{flex:1 1 120px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .tile b{display:block;font-size:22px}.meter{height:10px;background:#e2e8f0;border-radius:99px;overflow:hidden}.meter i{display:block;height:100%;background:var(--blue)}
   .chip{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;background:#eef2ff;color:var(--blue)}
   .chip.draft{background:#f1f5f9;color:#475569}.chip.in_review{background:#fff7ed;color:var(--amber)}
   .chip.changes_requested{background:#fef2f2;color:var(--red)}.chip.approved{background:#f0fdf4;color:var(--green)}
@@ -88,13 +93,24 @@
   <nav id="nav" class="hidden">
     <button data-tab="content" class="on">Content</button>
     <button data-tab="kb">Knowledge base</button>
+    <button data-tab="insights">Insights</button>
   </nav>
   <span class="sp"></span>
+  <button class="btn" onclick="tourStart()" aria-label="Take the guided tour">Tour</button>
   <label class="small muted" for="who">Signed in as</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off" style="width:130px">
   <select id="who" aria-label="Signed in as" style="width:auto"></select>
 </header>
-<main id="main"><p class="muted">Pick a user in the top right to begin. This demo uses synthetic data for a fictional brand, Brewline Coffee.</p></main>
+<main id="main"><div class="card"><h2>Welcome to BrandGuard</h2>
+  <p class="muted">Pick a user in the top right to begin. This demo uses synthetic data for a fictional brand, Brewline Coffee.</p>
+  <p><button class="btn primary" onclick="tourStart()">Take the 2-minute tour</button></p></div></main>
+<aside id="tour" class="hidden" role="dialog" aria-labelledby="tour-h" aria-live="polite">
+  <div class="small muted" id="tour-n"></div><b id="tour-h"></b><p id="tour-t" class="small"></p>
+  <div class="row"><button class="btn" id="tour-b" onclick="tourStep(-1)">Back</button>
+   <button class="btn primary hidden" id="tour-do" onclick="tourDo()">Do it for me</button>
+   <button class="btn" id="tour-nx" onclick="tourStep(1)">Next</button>
+   <button class="btn" onclick="tourClose()" aria-label="Close the tour">Close</button></div>
+</aside>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <script>
@@ -137,11 +153,64 @@ function afterLogin(){
   $('#nav').classList.remove('hidden');
   // Agency users cannot browse brand material, so they get no Knowledge base tab.
   document.querySelector('#nav [data-tab=kb]').classList.toggle('hidden',!!ME.is_external);
-  if(ME.is_external&&TAB==='kb')TAB='content';
+  // Insights are about the guidelines, for the people who own them (not for authors).
+  const noInsights=ME.role==='creator';
+  document.querySelector('#nav [data-tab=insights]').classList.toggle('hidden',noInsights);
+  if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights'))TAB='content';
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===TAB));
   render()}
 let RID=0; // only the most recent render may draw, so a slow earlier request cannot overwrite a newer screen
-function render(){TAB==='kb'?renderKB():renderContent()}
+function render(){TAB==='kb'?renderKB():TAB==='insights'?renderInsights():renderContent()}
+
+/* ------------------------------------------------------------ guided tour */
+const TOUR=[
+ {h:'The idea',t:'BrandGuard checks content against your approved guidelines and facts, shows exactly which rule each problem breaks, and leaves every decision to a person. This tour takes about two minutes.'},
+ {h:'1. The brand team loads its rules',t:'The admin imports guidelines, approved facts and a glossary. Press the button to sign in as Ira (admin) and load the synthetic Brewline Coffee knowledge base. If a passcode is required, type the admin passcode first.',who:4,act:async()=>{await tourAs(4);await api('/api/kb/seed',{json:{}});TAB='kb';afterLogin();toast('Demo knowledge base loaded.')}},
+ {h:'2. An agency writer drafts an email',t:'Neha works at an outside agency. She sees only her own content and cannot browse confidential facts. Press the button to sign in as Neha and fill in a demo email that has deliberate mistakes. Then press Review now.',who:1,act:async()=>{await tourAs(1);TAB='content';afterLogin();await renderContent();showNew();await loadDemo()}},
+ {h:'3. Every finding cites its source',t:'Each highlight names the guideline or fact it breaks, quotes it, and shows a suggested fix. Nothing changes until a person clicks Accept fix, Edit or Dismiss (a reason is required). Prices, dates and rankings are checked against the approved facts; the claim check lists what is supported, contradicted or has no source.'},
+ {h:'4. Decide, then submit',t:'Accept or edit the fixes, then press Submit for approval. Submitting needs every finding decided, so nothing is silently ignored. The launch date is embargoed, so Neha sees that it conflicts but not the approved date (🔒): she rewrites around it, or the brand team applies the fix.'},
+ {h:'5. A manager approves',t:'Approval needs a manager or reviewer who is not the author. Press the button to sign in as Arjun (manager), open the content and approve or request changes. Approved content is locked, and every step is in the audit trail.',who:2,act:async()=>{await tourAs(2);TAB='content';afterLogin()}},
+ {h:'6. The guidelines improve',t:'Insights show which rules authors repeatedly break and which ones people keep dismissing, so the brand team can fix unclear rules.',who:2,act:async()=>{await tourAs(2);TAB='insights';afterLogin()}},
+];
+let TI=0;
+async function tourAs(id){if(ME&&ME.id===id)return;
+  ME=await api('/api/login',{json:{user_id:id,passcode:$('#pass').value}});$('#who').value=id;CUR=null;DETAIL=null;KBDATA=null}
+function tourStart(){TI=0;tourShow()}
+function tourClose(){$('#tour').classList.add('hidden');document.body.style.paddingBottom=''}
+function tourStep(d){TI=Math.max(0,Math.min(TOUR.length-1,TI+d));tourShow()}
+function tourShow(){const st=TOUR[TI];$('#tour').classList.remove('hidden');
+  $('#tour-n').textContent='Step '+(TI+1)+' of '+TOUR.length;$('#tour-h').textContent=st.h;$('#tour-t').textContent=st.t;
+  $('#tour-b').disabled=TI===0;$('#tour-nx').disabled=TI===TOUR.length-1;$('#tour-do').classList.toggle('hidden',!st.act);
+  // keep the page scrollable past the panel, so it never hides a button the person needs to press
+  document.body.style.paddingBottom=($('#tour').offsetHeight+24)+'px'}
+function tourDo(){run(async()=>{const b=$('#tour-do');b.disabled=true;try{await TOUR[TI].act()}finally{b.disabled=false}})}
+
+/* ------------------------------------------------------------ insights */
+async function renderInsights(){
+  const rid=++RID;let d;
+  try{d=await api('/api/insights')}catch(e){if(rid!==RID)return;$('#main').innerHTML=`<div class="card"><h2>Insights</h2><p class="muted">${esc(e.message)}</p></div>`;return}
+  if(rid!==RID)return;
+  const c=d.content,top=Math.max(1,...d.rules.map(r=>r.flagged));
+  const tile=(n,l)=>`<div class="tile"><b>${esc(n)}</b><span class="muted small">${esc(l)}</span></div>`;
+  const disputed=d.rules.filter(r=>r.often_disputed);
+  $('#main').innerHTML=`<div class="stack">
+   <div class="card"><h2>Guideline insights</h2>
+    <p class="muted small">What authors trip over and which rules people dispute, counted from real decisions. It never names a person.</p>
+    <div class="tiles">${tile(c.total,'pieces of content')}${tile(c.approved,'approved')}${tile(c.in_review,'waiting for review')}
+     ${tile(d.changes_requested,'changes requested')}${tile(d.avg_hours_to_approve==null?'n/a':d.avg_hours_to_approve+' h','average time to approval')}</div></div>
+   <div class="card"><h2>Repeated mistakes</h2>
+    <p class="muted small">How often each rule or fact flagged a first draft. Rules that keep repeating may need clearer wording or training.</p>
+    ${d.rules.length?`<table>${d.rules.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td><b>${esc(r.title)}</b></td>
+      <td style="width:35%"><div class="meter" role="img" aria-label="${r.flagged} flags"><i style="width:${Math.round(100*r.flagged/top)}%"></i></div></td>
+      <td>${r.flagged}</td></tr>`).join('')}</table>`:'<p class="muted small">No findings yet. Review some content first.</p>'}</div>
+   <div class="card"><h2>Often disputed</h2>
+    <p class="muted small">Rules where at least half of the decisions were dismissals (with at least 2 decisions). Dismissing is allowed, but a pattern suggests the rule is unclear, outdated or too strict.</p>
+    ${disputed.length?disputed.map(r=>`<div class="item" style="cursor:default"><p><code>${esc(r.code)}</code> <b>${esc(r.title)}</b>
+       <span class="chip medium">${Math.round(r.dismissal_rate*100)}% dismissed</span></p>
+       <p class="small muted">${r.dismissed} dismissed, ${r.fixed} fixed. Rule text: ${esc(r.quote)}</p></div>`).join('')
+     :'<p class="muted small">Nothing is being disputed often. Either the rules are clear, or there is not enough data yet.</p>'}</div>
+   <div class="card"><h2>AI suggestions</h2>
+    <p class="small">${d.ai.suggested?`${d.ai.suggested} decided: ${d.ai.accepted} accepted or edited, ${d.ai.dismissed} dismissed.`:'No AI suggestions have been decided yet.'}</p></div></div>`}
 
 /* ------------------------------------------------------------ content list + detail */
 async function renderContent(){
@@ -198,7 +267,8 @@ async function loadDetail(id,rid){
        ${p.can_submit?`<button class="btn primary" onclick="act('submit')">Submit for approval</button>`:''}
        ${p.can_approve?`<button class="btn good" onclick="act('approve')">Approve</button>`:''}
        ${p.can_request_changes?`<button class="btn warn" onclick="reqChanges()">Request changes</button>`:''}
-       ${p.can_rerun&&c.status!=='approved'?`<button class="btn" onclick="act('review')">Re-run review</button>`:''}</div></div>
+       ${p.can_rerun&&c.status!=='approved'?`<button class="btn" onclick="act('review')">Re-run review</button>`:''}
+       <a class="btn" style="text-decoration:none;color:inherit" href="/api/content/${+c.id}/record" target="_blank" rel="noopener">Approval record</a></div></div>
      <p class="small muted" style="margin:8px 0 0">${c.status==='approved'
        ?`Approved${c.approved_by?' by '+esc(c.approved_by):''}. This version is locked.`
        :`${open?`${open} finding${open>1?'s':''} still need a decision.`:(d.findings.length?'Every finding has a decision.':'No findings.')} Nothing is applied until a person clicks.`}</p>
@@ -254,13 +324,13 @@ function findingCard(f,p,c){
   return `<div class="finding ${cls(f.severity)} ${done?'done':''}" id="f${f.id}">
     <div class="row"><span class="chip">${esc(f.category)}</span><span class="chip ${cls(f.severity)}">${esc(f.severity)} severity</span>
       <span class="chip">${esc(f.confidence)} confidence</span>${f.ai_generated?'<span class="chip ai">AI-generated</span>':''}
-      ${f.needs_reviewer?'<span class="chip high">needs reviewer</span>':''}</div>
+      ${f.needs_reviewer?'<span class="chip high">needs reviewer</span>':''}${f.restricted?'<span class="chip draft" title="Only the brand team can see this fact">🔒 restricted fact</span>':''}</div>
     <p style="margin:8px 0 4px"><b>${esc(f.issue)}</b></p>
     <div class="quote"><b>${f.source_type==='fact'?'Approved fact':'Guideline'} ${esc(f.source_id)}:</b> ${esc(f.source_quote)}</div>
     ${f.target==='body'?'<div class="small muted">Flagged text</div>':''}${diff}
     ${done?`<p class="small" style="margin:6px 0 0"><b>${esc(f.decision)}</b> by ${esc(f.decided_by_name||'')}${f.decision_reason?': '+esc(f.decision_reason):''}</p>`
     :(p.can_decide?`<div class="row" style="margin-top:8px">
-        <button class="btn good" ${fix?'':'disabled title="No suggested fix. Use Edit."'} onclick="decide(${f.id},'accept')">Accept fix</button>
+        <button class="btn good" ${fix?'':`disabled title="${f.restricted?'Restricted fact: ask the brand team, or use Edit.':'No suggested fix. Use Edit.'}"`} onclick="decide(${f.id},'accept')">Accept fix</button>
         <button class="btn" onclick="toggle('e${f.id}')">Edit</button>
         <button class="btn bad" onclick="toggle('d${f.id}')">Dismiss</button></div>
       <div id="e${f.id}" class="hidden row" style="margin-top:8px"><input type="text" id="et${f.id}" aria-label="Replacement text" value="${esc(fix||(f.target==='body'?f.span_text:''))}" style="flex:1">
@@ -286,6 +356,7 @@ async function renderKB(){
   let k;
   try{k=await api('/api/kb')}catch(e){if(rid!==RID)return;$('#main').innerHTML=`<div class="card"><h2>Knowledge base</h2><p class="muted">${esc(e.message)}</p></div>`;return}
   if(rid!==RID)return;
+  KBDATA=k;
   const admin=ME.role==='admin';
   $('#main').innerHTML=`<div class="stack">
    ${admin?`<div class="card stack"><h2>Import (admin)</h2>
@@ -299,11 +370,28 @@ async function renderKB(){
      <textarea id="itext" rows="3" aria-label="Pasted text or JSON" placeholder="…or paste text / JSON here"></textarea>
      <div><button class="btn" onclick="doImport()">Import</button></div></div>`:''}
    <div class="card"><h2>Guidelines</h2>${k.guidelines.map(g=>`<p><b>${esc(g.title)}</b> <span class="chip">${esc(g.access_level)}</span></p>
-     <table>${g.rules.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td><b>${esc(r.title)}</b></td><td>${esc(r.text)}</td></tr>`).join('')}</table>`).join('')||'<p class="muted small">None visible to you.</p>'}</div>
-   <div class="card"><h2>Approved facts</h2>${k.facts.length?`<table>${k.facts.map(f=>`<tr><td><code>${esc(f.code)}</code></td><td>${esc(f.kind)}</td><td>${esc(f.statement)}</td><td class="muted">${esc(f.source)} · ${esc(f.access_level)}</td></tr>`).join('')}</table>`:'<p class="muted small">None visible to you. Facts are confidential, so only managers, reviewers and admins can browse them.</p>'}</div>
-   <div class="card"><h2>Glossary</h2><table>${k.glossary.map(g=>`<tr><td>${esc(g.kind)}</td><td>${esc(g.term)} → <b>${esc(g.preferred)}</b></td><td><code>${esc(g.rule_code)}</code></td></tr>`).join('')}</table></div>
-   <div class="card"><h2>Reusable assets</h2><table>${k.assets.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.kind)}</td><td class="muted">${esc(a.note)}</td></tr>`).join('')}</table></div></div>`;
+     <table>${g.rules.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td><b>${esc(r.title)}</b></td><td>${esc(r.text)}</td>${admin?`<td class="nowrap">${kbBtns('rules',r.code)}</td>`:''}</tr>`).join('')}</table>`).join('')||'<p class="muted small">None visible to you.</p>'}</div>
+   <div class="card"><h2>Approved facts</h2>${k.facts.length?`<table>${k.facts.map(f=>`<tr><td><code>${esc(f.code)}</code></td><td>${esc(f.kind)}</td><td>${esc(f.statement)}</td><td class="muted">${esc(f.source)} · ${esc(f.access_level)}</td>${admin?`<td class="nowrap">${kbBtns('facts',f.code)}</td>`:''}</tr>`).join('')}</table>`:'<p class="muted small">None visible to you. Facts are confidential, so only managers, reviewers and admins can browse them.</p>'}</div>
+   <div class="card"><h2>Glossary</h2><table>${k.glossary.map(g=>`<tr><td>${esc(g.kind)}</td><td>${esc(g.term)} → <b>${esc(g.preferred)}</b></td><td><code>${esc(g.rule_code)}</code></td>${admin?`<td class="nowrap">${kbBtns('glossary',g.id)}</td>`:''}</tr>`).join('')}</table></div>
+   <div class="card"><h2>Reusable assets</h2><table>${k.assets.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.kind)}</td><td class="muted">${esc(a.note)}</td>${admin?`<td class="nowrap">${kbBtns('assets',a.id)}</td>`:''}</tr>`).join('')}</table></div></div>`;
 }
+/* admin: change or remove one item (prompt/confirm keep this small; the server validates everything) */
+const kbBtns=(kind,key)=>`<button class="btn" data-k="${kind}" data-id="${esc(key)}" onclick="kbEdit(this)" aria-label="Edit ${esc(key)}">Edit</button>
+  <button class="btn" data-k="${kind}" data-id="${esc(key)}" onclick="kbDel(this)" aria-label="Delete ${esc(key)}">Delete</button>`;
+function kbFind(kind,key){const k=KBDATA||{};
+  if(kind==='rules')return k.guidelines.flatMap(g=>g.rules).find(r=>r.code===key);
+  if(kind==='facts')return k.facts.find(f=>f.code===key);
+  return k[kind].find(x=>String(x.id)===String(key))}
+const kbEdit=b=>run(async()=>{const kind=b.dataset.k,key=b.dataset.id,cur=kbFind(kind,key);if(!cur)return;let patch={};
+  if(kind==='rules'){const t=prompt('Rule text',cur.text);if(t===null)return;patch={text:t}}
+  else if(kind==='facts'){const t=prompt('Approved statement',cur.statement);if(t===null)return;
+    const d=prompt('Checking data (JSON): this drives the automatic checks, e.g. the approved price or date',JSON.stringify(cur.data||{}));if(d===null)return;
+    let data;try{data=JSON.parse(d)}catch(e){throw new Error('That data is not valid JSON')}patch={statement:t,data}}
+  else if(kind==='glossary'){const t=prompt('Preferred wording for "'+cur.term+'"',cur.preferred);if(t===null)return;patch={preferred:t}}
+  else{const t=prompt('Note',cur.note||'');if(t===null)return;patch={note:t}}
+  await api('/api/kb/'+kind+'/'+encodeURIComponent(key),{method:'PATCH',json:patch});toast('Saved.');renderKB()});
+const kbDel=b=>run(async()=>{if(!confirm('Delete '+b.dataset.id+'? Findings already made keep their quoted text, but new reviews will not use it.'))return;
+  await api('/api/kb/'+b.dataset.k+'/'+encodeURIComponent(b.dataset.id),{method:'DELETE'});toast('Deleted.');renderKB()});
 const seed=()=>run(async()=>{if(!confirm('This replaces the current knowledge base (guidelines, facts, glossary, assets and check settings) with the demo one. Existing content and its findings are kept. Continue?'))return;const r=await api('/api/kb/seed',{json:{}});toast('Demo knowledge base loaded: '+r.guidelines.rules+' rules, '+r.facts+' facts.');renderKB()});
 const doImport=()=>run(async()=>{
   const fd=new FormData();fd.append('kind',$('#ik').value);fd.append('access_level',$('#il').value);fd.append('text',$('#itext').value);

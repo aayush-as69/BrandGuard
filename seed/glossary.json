@@ -1,7 +1,79 @@
 [
-  {"term": "cheap", "preferred": "affordable", "kind": "banned", "rule_code": "G-03", "note": "Cheap signals low quality."},
-  {"term": "addictive", "preferred": "irresistible", "kind": "banned", "rule_code": "G-07", "note": "Health language."},
-  {"term": "dude", "preferred": "Hello", "kind": "slang", "rule_code": "G-01", "note": "Too casual for the brand voice."},
-  {"term": "insanely good", "preferred": "wonderful", "kind": "slang", "rule_code": "G-01", "note": "Hype language."},
-  {"term": "game-changer", "preferred": "standout", "kind": "slang", "rule_code": "G-01", "note": "Hype language."}
+  {
+    "term": "cheap",
+    "preferred": "affordable",
+    "kind": "banned",
+    "rule_code": "G-03",
+    "note": "Cheap signals low quality."
+  },
+  {
+    "term": "addictive",
+    "preferred": "irresistible",
+    "kind": "banned",
+    "rule_code": "G-07",
+    "note": "Health language."
+  },
+  {
+    "term": "dude",
+    "preferred": "Hello",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Too casual for the brand voice."
+  },
+  {
+    "term": "insanely good",
+    "preferred": "wonderful",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hype language."
+  },
+  {
+    "term": "game-changer",
+    "preferred": "standout",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hype language."
+  },
+  {
+    "term": "yaar",
+    "preferred": "friend",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hinglish slang; too casual for the brand voice."
+  },
+  {
+    "term": "bhai",
+    "preferred": "friend",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hinglish slang; too casual for the brand voice."
+  },
+  {
+    "term": "bindaas",
+    "preferred": "relaxed",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hinglish slang."
+  },
+  {
+    "term": "jhakaas",
+    "preferred": "wonderful",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hinglish hype word."
+  },
+  {
+    "term": "ekdum mast",
+    "preferred": "really good",
+    "kind": "slang",
+    "rule_code": "G-01",
+    "note": "Hinglish hype phrase."
+  },
+  {
+    "term": "paisa vasool",
+    "preferred": "great value",
+    "kind": "banned",
+    "rule_code": "G-03",
+    "note": "Describe pricing as affordable or great value."
+  }
 ]

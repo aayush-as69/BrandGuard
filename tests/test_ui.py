@@ -44,3 +44,34 @@ def test_form_controls_have_accessible_names():
     unnamed = [i for i in inputs if "aria-label" not in i and "id=" not in i]
     assert not unnamed, unnamed
     assert 'role="status"' in HTML and "aria-live" in HTML
+
+
+def test_tour_exists_and_only_calls_real_endpoints():
+    import re
+    from pathlib import Path
+    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    tour = html[html.index("const TOUR=["):html.index("let TI=0")]
+    assert tour.count("{h:") >= 6
+    from brandguard.app import create_app
+    import tempfile
+    app = create_app(tempfile.mktemp(suffix=".db"))
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    for path in re.findall(r"api\('(/api/[a-z/-]+)'", tour):
+        assert path in rules, path
+
+
+def test_page_script_has_no_syntax_errors(tmp_path):
+    """The other UI tests read the page as text; this one makes sure the script actually parses."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which("node")
+    if not node:
+        import pytest
+        pytest.skip("node is not installed")
+    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    js = html[html.index("<script>") + 8:html.rindex("</script>")]
+    f = tmp_path / "page.js"
+    f.write_text(js, encoding="utf-8")
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[:600]
