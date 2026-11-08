@@ -48,13 +48,25 @@ def load_kb(conn: sqlite3.Connection) -> KB:
 
 
 # --------------------------------------------------------------------- helpers
+_ABBREV = {"no", "rs", "mr", "mrs", "ms", "dr", "st", "vs", "approx", "inc", "ltd"}
+
+
 def sentences(body: str) -> list[tuple[int, str]]:
-    """(offset, text) for every sentence, so findings can point at exact spans."""
+    """(offset, text) for every sentence, so findings can point at exact spans.
+    A full stop after an abbreviation ("No. 1", "Rs. 399") does not end a sentence."""
     out: list[tuple[int, str]] = []
     for line in re.finditer(r"[^\n]+", body):
-        for s in re.finditer(r".+?(?:[.!?]+(?=\s|$)|$)", line.group()):
-            if s.group().strip():
-                out.append((line.start() + s.start(), s.group()))
+        text, base, begin = line.group(), line.start(), 0
+        for m in re.finditer(r"[.!?]+(?=\s|$)", text):
+            word = re.search(r"([A-Za-z]+)$", text[:m.start()])
+            if m.group() == "." and word and word.group(1).lower() in _ABBREV:
+                continue
+            seg = text[begin:m.end()]
+            if seg.strip():
+                out.append((base + begin, seg))
+            begin = m.end()
+        if text[begin:].strip():
+            out.append((base + begin, text[begin:]))
     return out
 
 
@@ -178,7 +190,10 @@ def review(
     body: str,
     images: list[dict],
     judge: Optional[Callable[[str, KB, list[Finding]], tuple[list[Finding], str]]] = None,
+    inherited: Optional[list[Finding]] = None,
 ) -> ReviewResult:
+    """`inherited` are AI suggestions from the previous version, re-located in this text, so applying
+    a fix does not send the content to the AI service again."""
     res = ReviewResult()
     raw: list[Finding] = []
     sents = sentences(body)
@@ -273,7 +288,7 @@ def review(
         for off, sent in sents:
             low = sent.lower()
             # prices
-            for m in re.finditer(r"((?:₹|Rs\.?|INR)\s?)(\d(?:[\d,]*\d)?(?:\.\d+)?)", sent):
+            for m in re.finditer(r"(?<![A-Za-z])((?:₹|Rs\.?|INR)\s?)(\d(?:[\d,]*\d)?(?:\.\d+)?)", sent):
                 amount = float(m.group(2).replace(",", ""))
                 cands = [f for f in price_facts if any(t in low for t in f["data"].get("match", []))]
                 if not cands and len(price_facts) == 1:
@@ -338,7 +353,9 @@ def review(
 
     if claims_code:
         rank = re.compile(
-            r"(?:india['’]s\s+)?(?:#\s?1|no\.?\s?1|number\s+(?:one|1))(?:\s+([a-z][a-z-]+))?", re.I)
+            r"(?:(?<!\w)india['’]s\s+)?(?:#\s?1|(?<!\w)no\.?\s?1|(?<!\w)number\s+(?:one|1))(?!\d)"
+            r"(?:\s+(?!(?:is|are|was|were|in|on|at|for|of|to|by|and|or|with|among|since|that|the|a|an|as|but|from)\b)"
+            r"([a-z][a-z-]+))?", re.I)
         generic = re.compile(
             r"\b(?:the\s+)?(?:best|finest|greatest|unmatched|unbeatable|world['’]s\s+[a-z]+est)\b|\b100\s?%", re.I)
         for off, sent in sents:
@@ -429,9 +446,14 @@ def review(
         reason = verify(f, kb, body, images)
         (res.rejected.append(f"{f.issue} ({reason})") if reason else res.findings.append(f))
 
+    extra: list[Finding] = list(inherited or [])
+    if extra:
+        res.llm_status = f"{len(extra)} earlier AI suggestion(s) carried over; content was not re-sent"
     if judge:
-        extra, status = judge(body, kb, list(res.findings))
+        got, status = judge(body, kb, list(res.findings))
         res.llm_status = status
+        extra += got
+    if extra:
         for f in extra:
             reason = verify(f, kb, body, images)
             if reason:
