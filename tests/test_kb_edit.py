@@ -1,10 +1,4 @@
-import json
-
 from conftest import ARJUN, IRA, NEHA
-
-
-def _admin(seeded, login):
-    return login(IRA)
 
 
 def test_only_admin_can_edit_or_delete(seeded, login):

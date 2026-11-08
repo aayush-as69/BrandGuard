@@ -15,7 +15,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 | Text review, rules first | `brandguard/engine.py` |
 | Cited findings: span, rule or fact, source quote, severity, confidence | `brandguard/models.py` (`Finding`), `engine.verify` |
 | Claim check: supported / contradicted / no approved source | `engine.review` (prices, dates, rankings, superlatives, descriptive facts) |
-| Suggested fixes shown as a diff; accept, edit or dismiss | `workflow.decide`, `static/index.html` |
+| Suggested fixes shown as a diff; accept, edit or dismiss | `workflow.decide`, `static/app.js` |
 | Review workflow: roles, comments, approval, versions, audit log | `brandguard/workflow.py` |
 | Image and accessibility check (Should) | alt text length and WCAG contrast in `engine.py` |
 | Grounded AI judge for tone and messaging | `brandguard/llm.py` (optional, needs an API key; `scripts/check_live_ai.py` tests it end to end) |
@@ -30,7 +30,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # 104 tests
+python -m pytest -q                      # 105 tests
 ```
 
 ### Configuration (environment variables)
@@ -54,6 +54,17 @@ Fix findings, *Submit for approval*, then sign in as **Arjun (manager)** or **Me
 Optional AI judge: `export ANTHROPIC_API_KEY=...` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
 The content is sent to the AI service only when it is first reviewed, when its author edits it, or when someone presses *Re-run review*. Accepting a fix does not re-send it; earlier AI suggestions are carried over and re-located in the new text.
 
+## Code layout
+
+```
+brandguard/   engine.py (the checks)  workflow.py (roles, versions, approval)  kb.py (import, edit)  llm.py (AI judge)
+              insights.py  record.py  retrieve.py  models.py  db.py  errors.py  app.py (HTTP API)
+static/       index.html (markup)  style.css  app.js   - plain HTML/CSS/JS, no build step
+seed/         synthetic Brewline Coffee guidelines, facts, glossary, assets, settings, demo email
+scripts/      check_live_ai.py - end-to-end test of the real AI judge (needs a key and network)
+tests/        105 tests: engine, workflow, hardening, restricted facts, insights, record, UI, regressions
+```
+
 ## Architecture and main decisions
 
 ```
@@ -75,7 +86,7 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 
 ## Testing
 
-`python -m pytest -q` runs 104 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
+`python -m pytest -q` runs 105 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
 Writing these tests found and fixed several real bugs (an HTML page whose script silently failed to parse, a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, "a affordable" after a word swap, a 50,000-character post producing an ~800 MB response, a dismissal silently covering a later identical word, and highlights landing on the wrong text after an emoji).
 
 **Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, concurrent users, and user testing with real teams.
