@@ -48,6 +48,12 @@ def load_kb(conn: sqlite3.Connection) -> KB:
 
 
 # --------------------------------------------------------------------- helpers
+MAX_FINDINGS = 300      # a review shows at most this many; the rest means "fix these and run it again"
+MAX_CLAIM_TEXT = 300
+_ALWAYS_OK_CAPS = {"INR", "GST", "MRP", "FSSAI", "MSME", "GSTIN", "SKU", "CEO", "FAQ", "USD", "EMI"}
+_NEGATION = re.compile(r"\b(?:not|never|no|without|isn['’]t|aren['’]t|wasn['’]t|doesn['’]t|don['’]t)\s+(?:\w+\s+){0,2}$", re.I)
+_RELATIVE = re.compile(r"\b(?:after|before|since|until|till|following|post|by)\s+(?:the\s+|our\s+)?$", re.I)
+NEAR = 60               # a date counts as the launch date only if it sits this close to the word "launch"
 _ABBREV = {"no", "rs", "mr", "mrs", "ms", "dr", "st", "vs", "approx", "inc", "ltd"}
 
 
@@ -58,7 +64,7 @@ def sentences(body: str) -> list[tuple[int, str]]:
     for line in re.finditer(r"[^\n]+", body):
         text, base, begin = line.group(), line.start(), 0
         for m in re.finditer(r"[.!?]+(?=\s|$)", text):
-            word = re.search(r"([A-Za-z]+)$", text[:m.start()])
+            word = re.search(r"([A-Za-z]+)$", text[max(0, m.start() - 12):m.start()])
             if m.group() == "." and word and word.group(1).lower() in _ABBREV:
                 continue
             seg = text[begin:m.end()]
@@ -80,6 +86,23 @@ def match_case(original: str, replacement: str) -> str:
 
 def fmt_date(d: dt.date) -> str:
     return f"{d.day} {MONTH_NAMES[d.month - 1]} {d.year}"
+
+
+def find_partial_dates(text: str, taken: list[tuple[int, int]]) -> list[tuple[int, int, int, int]]:
+    """Dates written without a year ("15 December", "December 15th"): (start, end, month, day)."""
+    out = []
+    for rx, md in ((re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_RE})\b(?!\.?,?\s+\d{{4}})", re.I), (2, 1)),
+                   (re.compile(rf"\b({_MONTH_RE})\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?!,?\s+\d{{4}})", re.I), (1, 2))):
+        for m in rx.finditer(text):
+            if any(s <= m.start() < e for s, e in taken):
+                continue
+            try:
+                month, day = _MONTHS[m.group(md[0]).lower()], int(m.group(md[1]))
+                dt.date(2000, month, day)  # leap year, validates the day
+            except (KeyError, ValueError):
+                continue
+            out.append((m.start(), m.end(), month, day))
+    return out
 
 
 def find_dates(text: str) -> list[tuple[int, int, dt.date]]:
@@ -183,6 +206,7 @@ class ReviewResult:
     warnings: list[str] = field(default_factory=list)
     rejected: list[str] = field(default_factory=list)
     llm_status: str = "not used"
+    truncated: int = 0       # findings not shown because of MAX_FINDINGS
 
 
 def review(
@@ -223,11 +247,12 @@ def review(
             start, text = m.start(), m.group()
             fix = match_case(text, g["preferred"])
             # Keep "a"/"an" correct: "a cheap price" -> "an affordable price".
-            art = re.search(r"\b(an?)(\s+)$", body[:start], re.I)
+            lead = max(0, start - 12)
+            art = re.search(r"\b(an?)(\s+)$", body[lead:start], re.I)
             if art and fix[:1].isalpha():
                 want = "an" if fix[0].lower() in "aeiou" else "a"
                 if art.group(1).lower() != want:
-                    start = art.start()
+                    start = lead + art.start()
                     text = body[start:m.end()]
                     fix = f"{match_case(art.group(1), want)}{art.group(2)}{fix}"
             raw.append(guideline_finding(
@@ -259,7 +284,7 @@ def review(
                 ))
     code = cited("all_caps")
     if code:
-        allow = set(kb.checks["all_caps"].get("allow", []))
+        allow = set(kb.checks["all_caps"].get("allow", [])) | _ALWAYS_OK_CAPS
         for m in re.finditer(r"\b[A-Z]{3,}\b", body):
             if m.group() in allow:
                 continue
@@ -281,8 +306,15 @@ def review(
     def fact_finding(fact: dict, **kw) -> Finding:
         return Finding(source_type="fact", source_id=fact["code"], source_quote=fact["statement"], **kw)
 
+    seen_claims: set[tuple[str, str, str]] = set()
+
     def add_claim(text: str, status: str, source_id: str = "") -> None:
-        res.claims.append({"text": text.strip(), "status": status, "source_id": source_id})
+        text = " ".join(text[:MAX_CLAIM_TEXT * 4].split())  # cut first: never normalise a huge sentence
+        if len(text) > MAX_CLAIM_TEXT:
+            text = text[:MAX_CLAIM_TEXT].rstrip() + "…"
+        if (text, status, source_id) not in seen_claims:
+            seen_claims.add((text, status, source_id))
+            res.claims.append({"text": text, "status": status, "source_id": source_id})
 
     if facts_code:
         for off, sent in sents:
@@ -291,17 +323,29 @@ def review(
             for m in re.finditer(r"(?<![A-Za-z])((?:₹|Rs\.?|INR)\s?)(\d(?:[\d,]*\d)?(?:\.\d+)?)", sent):
                 amount = float(m.group(2).replace(",", ""))
                 cands = [f for f in price_facts if any(t in low for t in f["data"].get("match", []))]
+                guessed = False
                 if not cands and len(price_facts) == 1:
-                    cands = price_facts
+                    cands, guessed = price_facts, True  # nothing says which price this is
                 if not cands:
                     add_claim(sent, "no_approved_source")
                     continue
                 fact = cands[0]
                 approved = float(fact["data"]["amount"])
+                shown = f"{approved:,.0f}" if approved.is_integer() else f"{approved:,.2f}"
                 if amount == approved:
                     add_claim(sent, "supported", fact["code"])
+                elif guessed:
+                    # "Free delivery above ₹999" is not the product price: ask a person, do not assert.
+                    add_claim(sent, "no_approved_source")
+                    raw.append(fact_finding(
+                        fact, category="fact",
+                        issue=(f"{m.group(0)} is not an approved price. If it is the product price, "
+                               f"the approved price is {m.group(1)}{shown}."),
+                        span_text=m.group(0), span_start=off + m.start(), span_end=off + m.end(),
+                        severity="medium", confidence="low",
+                        fix_note="Check whether this amount refers to the product; no fix is applied automatically.",
+                    ))
                 else:
-                    shown = f"{approved:,.0f}" if approved.is_integer() else f"{approved:,.2f}"
                     add_claim(sent, "contradicted", fact["code"])
                     raw.append(fact_finding(
                         fact, category="fact",
@@ -310,9 +354,20 @@ def review(
                         severity="high", confidence="high", suggested_fix=f"{m.group(1)}{shown}",
                     ))
             # dates
-            for start, end, d in find_dates(sent):
+            def about(fact: dict, start: int, end: int) -> bool:
+                """The date is the one the fact describes: a matching word sits close by and does not
+                just relate to it ("after the launch" is not the launch date)."""
+                for t in fact["data"].get("match", []):
+                    for tm in re.finditer(re.escape(t), low):
+                        gap = max(tm.start() - end, start - tm.end(), 0)
+                        if gap <= NEAR and not _RELATIVE.search(low[:tm.start()]):
+                            return True
+                return False
+
+            dates = find_dates(sent)
+            for start, end, d in dates:
                 for fact in date_facts:
-                    if not any(t in low for t in fact["data"].get("match", [])):
+                    if not about(fact, start, end):
                         continue
                     approved = dt.date.fromisoformat(fact["data"]["date"])
                     if d == approved:
@@ -324,6 +379,22 @@ def review(
                             issue=f"Date is {fmt_date(d)} but the approved date is {fmt_date(approved)}.",
                             span_text=sent[start:end], span_start=off + start, span_end=off + end,
                             severity="high", confidence="high", suggested_fix=fmt_date(approved),
+                        ))
+            for start, end, month, day in find_partial_dates(sent, [(a, b) for a, b, _ in dates]):
+                for fact in date_facts:
+                    if not about(fact, start, end):
+                        continue
+                    approved = dt.date.fromisoformat(fact["data"]["date"])
+                    if (month, day) == (approved.month, approved.day):
+                        add_claim(sent, "supported", fact["code"])
+                    else:
+                        add_claim(sent, "contradicted", fact["code"])
+                        short = f"{approved.day} {MONTH_NAMES[approved.month - 1]}"
+                        raw.append(fact_finding(
+                            fact, category="fact",
+                            issue=f"Date is {sent[start:end]} but the approved date is {fmt_date(approved)}.",
+                            span_text=sent[start:end], span_start=off + start, span_end=off + end,
+                            severity="high", confidence="medium", suggested_fix=short,
                         ))
             # descriptive facts (sourcing, roast, ...)
             for fact in claim_facts:
@@ -339,6 +410,8 @@ def review(
                     for m in re.finditer(rf"(?<![\w-]){re.escape(bad)}", sent, re.I):
                         if any(s <= m.start() and m.end() <= e for s, e in approved_spans):
                             continue
+                        if _NEGATION.search(sent[:m.start()]):
+                            continue  # "not a light roast" agrees with the fact
                         hit = True
                         add_claim(sent, "contradicted", fact["code"])
                         raw.append(fact_finding(
@@ -438,7 +511,7 @@ def review(
     for f in raw:
         fix = f.suggested_fix
         if (f.target == "body" and fix and f.span_start >= 0 and fix[0].isalpha() and fix[0].islower()
-                and sentence_start.search(body[:f.span_start])):
+                and sentence_start.search(body[max(0, f.span_start - 40):f.span_start])):
             f.suggested_fix = fix[0].upper() + fix[1:]
 
     # 5. Verify everything, then optionally ask the grounded LLM judge --------------
@@ -465,4 +538,10 @@ def review(
                 res.findings.append(f)
 
     res.findings.sort(key=lambda f: (f.span_start if f.span_start >= 0 else 10**9, f.issue))
+    if len(res.findings) > MAX_FINDINGS:
+        res.truncated = len(res.findings) - MAX_FINDINGS
+        res.findings = res.findings[:MAX_FINDINGS]
+        res.warnings.append(
+            f"{res.truncated} more findings are not shown (limit {MAX_FINDINGS}). "
+            "Fix these, then run the review again to see the rest.")
     return res
