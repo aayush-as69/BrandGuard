@@ -23,16 +23,31 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ## Run it
 
 ```bash
-pip install flask pydantic python-docx pypdf requests pytest   # no other dependencies
-python run.py                                                  # http://127.0.0.1:5000
-python -m pytest -q                                            # 28 tests
+pip install -r requirements-dev.txt      # runtime + pytest
+python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
+python -m pytest -q                      # 53 tests
 ```
+
+### Configuration (environment variables)
+
+| Variable | Purpose |
+|---|---|
+| `BRANDGUARD_PASSCODE` | If set, every sign-in needs this passcode. Leave unset for local demos. |
+| `BRANDGUARD_ADMIN_PASSCODE` | Separate passcode for the admin user (defaults to `BRANDGUARD_PASSCODE`). |
+| `BRANDGUARD_SECRET` | Session signing key. If unset, one is generated and kept beside the database (`*.secret`, git-ignored). |
+| `BRANDGUARD_ENV=production` | Refuses to start unless `BRANDGUARD_SECRET` and `BRANDGUARD_PASSCODE` are set, and marks the session cookie `Secure` (serve over HTTPS). |
+| `BRANDGUARD_DB` | SQLite file path (default `brandguard.db`). |
+| `ANTHROPIC_API_KEY`, `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off` | Optional AI judge (see below). |
+
+Hosting: `gunicorn -w 1 --threads 4 "brandguard.app:create_app()"` (SQLite, so keep one worker process).
+A public URL must set `BRANDGUARD_ENV=production`; otherwise anyone could sign in as admin.
 
 Demo walkthrough: sign in as **Ira (admin)** → Knowledge base → *Load Brewline demo knowledge base*.
 Sign in as **Neha (agency creator)** → New → *Load demo email* → *Review now*.
 Fix findings, *Submit for approval*, then sign in as **Arjun (manager)** or **Meera (reviewer)** to approve.
 
 Optional AI judge: `export ANTHROPIC_API_KEY=...` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
+The content is sent to the AI service only when it is first reviewed, when its author edits it, or when someone presses *Re-run review*. Accepting a fix does not re-send it; earlier AI suggestions are carried over and re-located in the new text.
 
 ## Architecture and main decisions
 
@@ -51,17 +66,21 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 
 - **Flask instead of FastAPI.** FastAPI was not installable in the build environment (package installs were disabled). Pydantic still validates every finding, so the "malformed output is rejected" property is unchanged. The service layer is framework-independent, so a port is mechanical.
 - **SQLite and BM25 instead of PostgreSQL + pgvector** for now (listed as dev default in the plan). Retrieval is keyword-based; embeddings are the planned upgrade.
-- **Sign-in is a user switcher** (session cookie, no passwords) so judges can try every role quickly. This is a demo mechanism, not authentication.
+- **Sign-in is a user switcher plus an optional shared passcode** (admin can have its own), so judges can try every role quickly. This is a demo mechanism, not real authentication: there are no individual accounts, SSO or password resets. Wrong passcodes are rate limited (10 per 5 minutes per address) and production mode refuses to start without one.
 
 ## Testing
 
-`python -m pytest -q` runs 28 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; the full creator → manager → reviewer approval flow; role and access restrictions; dismissals carried across versions. Writing these tests found and fixed two real bugs (a price span that swallowed a comma, and "medium-dark roast" being flagged as contradicting itself).
+`python -m pytest -q` runs 53 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
+Writing these tests found and fixed several real bugs (a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, and "a affordable" after a word swap).
 
 **Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, concurrent users, and user testing with real teams.
 
 ## Known limitations
 
 - Single organisation: workspaces are not yet isolated per organisation.
+- SQLite with one writer: fine for a demo and a few users, not for heavy concurrent use (writes are guarded so conflicts are refused rather than corrupting versions).
+- Timestamps are stored in UTC and shown in the viewer's local time.
+- Sentence and claim detection are rule-based and English-only; unusual phrasing can be missed.
 - Rule-based fixes are minimal word swaps; stronger, intent-preserving rewrites are a Round 3 improvement.
 - Claim extraction covers prices (₹/Rs/INR), dates, rankings, common superlatives and keyword facts, not every possible claim.
 - Images are described by name, alt text and colours entered by the user; vision-based reading of uploaded images is not built yet.
