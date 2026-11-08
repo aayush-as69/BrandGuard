@@ -100,12 +100,14 @@ def test_full_approval_flow(seeded, login, demo):
         f = open_[0]
         if f["suggested_fix"]:
             r = neha.post(f"/api/findings/{f['id']}/decide", action="accept")
+        elif f["restricted"]:  # the launch date is embargoed: the agency writes around it
+            r = neha.post(f"/api/findings/{f['id']}/decide", action="edit", text="a date we will confirm soon")
         else:
             r = neha.post(f"/api/findings/{f['id']}/decide", action="edit", text="Copper pouch of Signature Blend")
         assert r.status_code == 200, r.get_json()
     d = detail(neha, cid)
     assert d["findings"] == []
-    assert "₹449" in d["body"] and "15 December 2026" in d["body"] and "medium-dark roast" in d["body"]
+    assert "₹449" in d["body"] and "a date we will confirm soon" in d["body"] and "medium-dark roast" in d["body"]
 
     assert neha.post(f"/api/content/{cid}/approve").status_code == 403  # author cannot approve
     assert neha.post(f"/api/content/{cid}/submit").status_code == 200
@@ -163,7 +165,8 @@ def test_external_agency_sees_only_own_work_and_no_confidential_material(seeded,
 
 def test_internal_creator_sees_guidelines_but_not_confidential_fact_sheet(seeded, login):
     kb = login(RAHUL).get("/api/kb").get_json()
-    assert kb["guidelines"] and kb["facts"] == []
+    assert kb["guidelines"]
+    assert {f["code"] for f in kb["facts"]} == {"F-01", "F-03", "F-04"}   # public facts only; the embargoed date is hidden
     assert len(login(ARJUN).get("/api/kb").get_json()["facts"]) == 4
 
 

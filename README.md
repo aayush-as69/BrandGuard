@@ -18,14 +18,19 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 | Suggested fixes shown as a diff; accept, edit or dismiss | `workflow.decide`, `static/index.html` |
 | Review workflow: roles, comments, approval, versions, audit log | `brandguard/workflow.py` |
 | Image and accessibility check (Should) | alt text length and WCAG contrast in `engine.py` |
-| Grounded AI judge for tone and messaging | `brandguard/llm.py` (optional, needs an API key) |
+| Grounded AI judge for tone and messaging | `brandguard/llm.py` (optional, needs an API key; `scripts/check_live_ai.py` tests it end to end) |
+| Guideline insights (repeated mistakes, often-disputed rules) | `brandguard/insights.py`, Insights tab (managers, reviewers, admins) |
+| Printable approval record: text, findings with sources, decisions, approver, audit trail | `brandguard/record.py`, `GET /api/content/<id>/record` |
+| Guided 2-minute tour through every role | "Tour" button in the page header |
+| Edit or delete single rules, facts, glossary terms and assets (admin) | `PATCH/DELETE /api/kb/<section>/<id>` |
+| Hinglish slang in the demo glossary (yaar, bhai, bindaas, jhakaas, ekdum mast, paisa vasool) | `seed/glossary.json` |
 
 ## Run it
 
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # 69 tests
+python -m pytest -q                      # 104 tests
 ```
 
 ### Configuration (environment variables)
@@ -60,7 +65,7 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 - **Grounded AI.** The model sees only the content plus the top guideline rules retrieved by BM25. It must return a rule code, a verbatim quote of the rule and a verbatim span of the content. `engine.verify` checks all three; anything that fails is discarded and counted in the review header. AI findings are labelled, capped at *medium* confidence and never auto-applied. Everything sent to the API is stored in `llm_log`.
 - **Data-driven checks.** Which rule each check cites, and its limits, live in the `settings` table (imported from `seed/settings.json`), not in code. If a configured rule is missing from the knowledge base, the check is skipped with a visible warning instead of failing silently.
 - **Human control is enforced in the server, not just the UI** (`workflow.py`): dismissals need a reason; dismissing fact, claim or low-confidence findings needs a manager or reviewer; approval needs every finding decided, a manager or reviewer who is not the author, and a reviewer specifically if a claim was dismissed; approved content is locked; every action is audited.
-- **Access.** External agency users see only their own content and cannot browse the knowledge base. Facts are `confidential`: internal creators browse guidelines only; managers, reviewers and admins browse everything.
+- **Access.** External agency users see only their own content and cannot browse the knowledge base. Each fact has an access level. Agency users see public facts only, internal creators see public and internal ones, and managers, reviewers and admins see everything. For a fact someone may not see, a finding says that something conflicts and where, but hides the fact, the approved value and the suggested fix, and "Accept fix" is refused, because applying it would reveal the value. They can rewrite the text themselves, and a manager can apply the fix for them. In the demo the launch date is confidential (an embargo); price, sourcing and roast are public.
 
 ## Deviations from the Round 1 plan (disclosure)
 
@@ -70,8 +75,8 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 
 ## Testing
 
-`python -m pytest -q` runs 69 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
-Writing these tests found and fixed several real bugs (a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, "a affordable" after a word swap, a 50,000-character post producing an ~800 MB response, a dismissal silently covering a later identical word, and highlights landing on the wrong text after an emoji).
+`python -m pytest -q` runs 104 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
+Writing these tests found and fixed several real bugs (an HTML page whose script silently failed to parse, a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, "a affordable" after a word swap, a 50,000-character post producing an ~800 MB response, a dismissal silently covering a later identical word, and highlights landing on the wrong text after an emoji).
 
 **Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, concurrent users, and user testing with real teams.
 
@@ -85,16 +90,18 @@ Writing these tests found and fixed several real bugs (a price span that swallow
 - At most 300 findings are shown per review; if there are more, the rest is flagged and the content cannot be submitted until the visible ones are fixed and the review is run again.
 - Amounts that are not tied to a known product ("free delivery above ₹999") are raised as low-confidence questions for a reviewer, not as errors. Negated claims ("not a light roast") are ignored; dates are compared only when they sit near the fact's own words.
 - A dismissal carries to a later version only for the same wording in the same sentence.
-- Finding quotes show the text of the fact they cite, so external agency users can see confidential fact statements (such as the approved price) through their own findings, even though they cannot browse the knowledge base. Redacting these is a Round 3 option.
+- Glossary matching is for Latin script, including Hinglish. Devanagari terms are not matched reliably yet.
 - Claim extraction covers prices (₹/Rs/INR), dates, rankings, common superlatives and keyword facts, not every possible claim.
 - Images are described by name, alt text and colours entered by the user; vision-based reading of uploaded images is not built yet.
 - Not a substitute for legal advice.
 
-## Round 3 improvements (to be confirmed)
+## Next steps
 
-1. Guideline insights: repeated mistakes and often-disputed rules.
-2. Intent-preserving rewrites with a diff view.
-3. Privacy mode with leakage tests (redact secrets before AI calls).
+1. Run `scripts/check_live_ai.py` with a real `ANTHROPIC_API_KEY`: the live call is the one path the tests cannot cover.
+2. Real per-user accounts (SSO or individual passwords) instead of the user switcher.
+3. Read uploaded images with a vision model, so alt text and contrast come from the image itself.
+4. Intent-preserving rewrites with a diff view, and privacy mode with leakage tests (redact secrets before AI calls).
+5. Per-organisation workspaces and PostgreSQL.
 
 ## AI disclosure
 

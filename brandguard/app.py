@@ -9,10 +9,12 @@ import sqlite3
 import time
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request, send_from_directory, session
+from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
 
 from . import db as dbm
+from . import insights
+from . import record
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -213,12 +215,40 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             rules = [dict(r) for r in c.execute(
                 "SELECT code, title, text FROM rules WHERE guideline_id=? ORDER BY id", (gl["id"],))]
             guidelines.append({**dict(gl), "rules": rules})
-        facts = [dict(r) for r in c.execute("SELECT code, kind, statement, source, access_level FROM facts ORDER BY id")
+        facts = [dict(r) for r in c.execute("SELECT code, kind, statement, source, access_level, data FROM facts ORDER BY id")
                  if LEVELS[r["access_level"]] <= level]
-        assets = [dict(r) for r in c.execute("SELECT name, kind, note, access_level FROM assets ORDER BY id")
+        for f in facts:
+            f["data"] = json.loads(f["data"]) if user["role"] == "admin" else None  # the checking data is for editing
+        assets = [dict(r) for r in c.execute("SELECT id, name, kind, note, access_level FROM assets ORDER BY id")
                   if LEVELS[r["access_level"]] <= level]
-        glossary = [dict(r) for r in c.execute("SELECT term, preferred, kind, rule_code, note FROM glossary ORDER BY id")]
+        glossary = [dict(r) for r in c.execute("SELECT id, term, preferred, kind, rule_code, note FROM glossary ORDER BY id")]
         return jsonify(guidelines=guidelines, facts=facts, glossary=glossary, assets=assets)
+
+    @app.route("/api/kb/<kind>/<key>", methods=["PATCH", "DELETE"])
+    def kb_item(kind: str, key: str):
+        """Admin: change or remove one rule, fact, glossary term or asset."""
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can change the knowledge base")
+        ops = {"rules": (kbm.update_rule, kbm.delete_rule, False), "facts": (kbm.update_fact, kbm.delete_fact, False),
+               "glossary": (kbm.update_glossary, kbm.delete_glossary, True), "assets": (kbm.update_asset, kbm.delete_asset, True)}
+        if kind not in ops:
+            raise NotFound("Unknown knowledge-base section")
+        update, delete, numeric = ops[kind]
+        if numeric:
+            if not key.isdigit():
+                raise NotFound("No such item")
+            key = int(key)
+        c = conn()
+        if request.method == "PATCH":
+            patch = payload()
+            update(c, key, patch)
+            wf.audit(c, None, user["id"], "kb_edited", f"{kind}/{key}: {', '.join(sorted(patch))}")
+        else:
+            delete(c, key)
+            wf.audit(c, None, user["id"], "kb_deleted", f"{kind}/{key}")
+        c.commit()
+        return jsonify(ok=True)
 
     @app.post("/api/kb/seed")
     def kb_seed():
@@ -271,11 +301,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         return jsonify(json.loads((ROOT / "seed" / "demo_email.json").read_text(encoding="utf-8")))
 
     # ------------------------------------------------------------------ content
-    def finding_dict(r) -> dict:
+    def finding_dict(r, visible: set[str]) -> dict:
         d = dict(r)
         d["ai_generated"] = bool(d["ai_generated"])
         d["needs_reviewer"] = bool(d["needs_reviewer"])
-        return d
+        d["restricted"] = False
+        return wf.redact(d) if wf.is_restricted(d, visible) else d
 
     @app.get("/api/content")
     def content_list():
@@ -287,16 +318,15 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         cid = wf.create_content(conn(), user, data.get("title"), data.get("body"), data.get("images"), judge_factory)
         return jsonify(id=cid), 201
 
-    @app.get("/api/content/<int:cid>")
-    def content_detail(cid: int):
-        user, c = me(), conn()
+    def detail_payload(user: dict, c: sqlite3.Connection, cid: int) -> dict:
         content = wf.get_content(c, user, cid)
         v = wf.current(c, content)
-        findings = [finding_dict(r) for r in c.execute(
+        visible = wf.visible_facts(c, user)
+        findings = [finding_dict(r, visible) for r in c.execute(
             "SELECT f.*, u.name AS decided_by_name FROM findings f LEFT JOIN users u ON u.id=f.decided_by "
             "WHERE f.content_id=? AND f.version=? ORDER BY CASE WHEN f.span_start<0 THEN 1 ELSE 0 END, f.span_start, f.id",
             (cid, content["current_version"]))]
-        history = [finding_dict(r) for r in c.execute(
+        history = [finding_dict(r, visible) for r in c.execute(
             "SELECT f.*, u.name AS decided_by_name FROM findings f LEFT JOIN users u ON u.id=f.decided_by "
             "WHERE f.content_id=? AND f.version<? AND f.decision IN ('accepted','edited') ORDER BY f.id",
             (cid, content["current_version"]))]
@@ -314,17 +344,32 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "SELECT u.name FROM audit a JOIN users u ON u.id=a.user_id "
             "WHERE a.content_id=? AND a.action='approved' ORDER BY a.id DESC LIMIT 1", (cid,)).fetchone()
         content["approved_by"] = approver["name"] if approver else None
+        content["approved_at"] = c.execute(
+            "SELECT created_at FROM audit WHERE content_id=? AND action='approved' ORDER BY id DESC LIMIT 1",
+            (cid,)).fetchone()
+        content["approved_at"] = content["approved_at"]["created_at"] if content["approved_at"] else None
         audit_rows = []
         if user["role"] != "creator":  # audit trail is for managers, reviewers and admins
             audit_rows = [dict(r) for r in c.execute(
                 "SELECT a.*, u.name AS who FROM audit a LEFT JOIN users u ON u.id=a.user_id "
                 "WHERE a.content_id=? ORDER BY a.id DESC", (cid,))]
-        return jsonify(
+        return dict(
             content={**content, "author": author}, body=v["body"], images=v["images"],
             review_meta=v["review_meta"], findings=findings, history=history, claims=claims,
             comments=comments, versions=versions, audit=audit_rows,
             permissions=wf.permissions(c, user, content),
         )
+
+    @app.get("/api/content/<int:cid>")
+    def content_detail(cid: int):
+        return jsonify(detail_payload(me(), conn(), cid))
+
+    @app.get("/api/content/<int:cid>/record")
+    def content_record(cid: int):
+        """A printable record: the text, every finding with its source and decision, who approved, and when."""
+        user = me()
+        return Response(record.render(detail_payload(user, conn(), cid), user["name"]),
+                        mimetype="text/html; charset=utf-8")
 
     @app.post("/api/content/<int:cid>/revise")
     def content_revise(cid: int):
@@ -368,6 +413,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def content_request_changes(cid: int):
         wf.request_changes(conn(), me(), cid, payload().get("note"))
         return jsonify(ok=True)
+
+    @app.get("/api/insights")
+    def insights_view():
+        if me()["role"] not in ("admin", "manager", "reviewer"):
+            raise Forbidden("Insights are for managers, reviewers and admins")
+        return jsonify(insights.compute(conn()))
 
     @app.get("/api/llm-log")
     def llm_log():
