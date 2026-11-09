@@ -23,28 +23,72 @@ def _check_level(level: str) -> str:
     return level
 
 
+MAX_EXTRACT_CHARS = 500_000        # text taken from one upload
+MAX_PDF_PAGES = 200
+MAX_DOCX_UNCOMPRESSED = 50 * 1024 * 1024   # all parts of a .docx, once unzipped
+MAX_DOCX_RATIO = 100               # unzipped size / zipped size: higher looks like a zip bomb
+
+
+def _too_long() -> ValueError:
+    return ValueError(f"That file has more than {MAX_EXTRACT_CHARS:,} characters of text. Split it and import the parts.")
+
+
+def _check_docx_container(data: bytes) -> None:
+    """Refuse a .docx whose parts would unzip to something huge, before any parser opens it."""
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        infos = zf.infolist()
+        if len(infos) > 5000:
+            raise ValueError("That .docx has too many parts to be a normal document")
+        total = sum(i.file_size for i in infos)
+        if total > MAX_DOCX_UNCOMPRESSED or total > MAX_DOCX_RATIO * max(len(data), 1):
+            raise ValueError("That .docx expands to an unreasonable size and was not opened")
+
+
 def extract_text(filename: str, data: bytes) -> str:
-    """Return plain text from a .txt/.md, .docx or .pdf upload."""
+    """Return plain text from a .txt/.md, .docx or .pdf upload, within fixed limits on size, pages and text."""
     name = filename.lower()
     try:
         if name.endswith((".txt", ".md", ".markdown")):
-            return data.decode("utf-8", errors="replace")
+            text = data.decode("utf-8", errors="replace")
+            if len(text) > MAX_EXTRACT_CHARS:
+                raise _too_long()
+            return text
         if name.endswith(".docx"):
             import docx  # python-docx
 
+            _check_docx_container(data)
             document = docx.Document(io.BytesIO(data))
-            return "\n".join(p.text for p in document.paragraphs)
+            parts, size = [], 0
+            for p in document.paragraphs:
+                size += len(p.text) + 1
+                if size > MAX_EXTRACT_CHARS:
+                    raise _too_long()
+                parts.append(p.text)
+            return "\n".join(parts)
         if name.endswith(".pdf"):
             from pypdf import PdfReader
 
             reader = PdfReader(io.BytesIO(data))
-            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if reader.is_encrypted:
+                raise ValueError("That PDF is password-protected. Remove the password or paste the text instead.")
+            if len(reader.pages) > MAX_PDF_PAGES:
+                raise ValueError(f"That PDF has {len(reader.pages)} pages; the limit is {MAX_PDF_PAGES}.")
+            parts, size = [], 0
+            for page in reader.pages:
+                chunk = page.extract_text() or ""
+                size += len(chunk) + 1
+                if size > MAX_EXTRACT_CHARS:
+                    raise _too_long()
+                parts.append(chunk)
+            text = "\n".join(parts)
             if not text.strip():
                 raise ValueError("That PDF has no selectable text (it may be a scan). Paste the text instead.")
             return text
     except ValueError:
         raise
-    except Exception as exc:  # corrupt or encrypted files
+    except Exception as exc:  # corrupt files
         raise ValueError(f"Could not read that file ({type(exc).__name__}). Is it a valid {name.rsplit('.', 1)[-1]}?") from exc
     raise ValueError("Unsupported file type. Use .txt, .md, .docx or .pdf")
 

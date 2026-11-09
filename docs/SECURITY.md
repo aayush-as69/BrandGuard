@@ -16,6 +16,13 @@ is redacted (no quote, no rule text, no suggested fix from it), and "Accept fix"
 **Request safety.** State-changing requests with a cross-site `Origin` or `Sec-Fetch-Site: cross-site` are refused. The CSP allows
 no inline script (`script-src 'self'`), no framing, no plugins. All server text is HTML-escaped before display. Uploads are capped at 10 MB.
 
+**Uploads.** 10 MB cap per request, then per file: at most 500,000 characters of text, 200 PDF pages, no password-protected PDFs, and a .docx is
+refused before parsing if its parts would unzip to over 50 MB or more than 100 times its size (zip bombs). Errors are clear 400s.
+
+**Errors.** Database errors are logged on the server and never shown; the client gets a short safe message (for example "That email address is already in use").
+
+**Throttle.** Failed sign-ins (per address and per email) are counted in the shared database, so several workers enforce one limit; if the store fails, sign-in is refused.
+
 **AI.** Output is verified: a finding must quote a real rule and real text from the content or it is dropped. AI findings are labelled,
 capped at medium confidence, never auto-applied. See PRIVACY.md.
 

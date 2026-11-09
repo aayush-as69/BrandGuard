@@ -32,11 +32,33 @@ Staging should use `BRANDGUARD_AUTH=accounts`, its own database and its own API 
 With `BRANDGUARD_LOG_JSON=1` each request logs one JSON line (time, method, path, status, user id, milliseconds). Content, passwords and
 query strings are never logged.
 
+## Monitoring and alerts
+
+- Point the platform's health check (or an external monitor: UptimeRobot, Better Stack, Cloud Monitoring) at `GET /healthz` every minute and alert
+  after two failures in a row. A 503 means the database could not be read; 200 reports the schema version.
+- Alert on a rising share of 5xx and 429 responses in the JSON logs (`status` field) and on any `Unhandled error` log line.
+- Run `python scripts/smoke_test.py ...` from the monitor or CI after each deploy (it signs in through the real proxy).
+- Watch disk space on the data volume: SQLite stops accepting writes when it is full.
+
+## Verifying HTTPS and origin behaviour through the proxy
+
+The app trusts the `Host` it receives to decide which `Origin` may write. After deploying, the smoke test must pass **through the public
+URL**. If the proxy rewrites `Host`, writes fail with "Cross-site request refused": either forward the original Host or list the public
+origin in `BRANDGUARD_ALLOWED_ORIGINS`. Confirm by hand once: `curl -i https://your-host/healthz` shows `Strict-Transport-Security`, and
+`curl -i -X POST https://your-host/api/login -H 'Origin: https://evil.example' -d '{}'` returns 403.
+
 ## Database migrations
 
 The schema version lives in SQLite's `PRAGMA user_version`. On every start the app applies any newer migration, each in its own
 transaction, safe when several workers start together. Migrations are listed in `brandguard/db.py` (`MIGRATIONS`). To add one,
 append `(next_number, "description", function)`; never edit an old one. **Back up before upgrading.**
+
+**If a migration fails or the process is killed during one:** each migration runs in a single transaction, so the database is left exactly as it
+was (tests kill a process mid-migration to prove it). Fix the cause and start again; the app retries on every start. Nothing needs undoing.
+
+**Rolling back a release that already migrated:** migrations only ever add (columns, tables, indexes), so the previous release still runs on the
+newer schema. If you must return to the exact old schema, stop the app and restore the backup you took before the upgrade (see below).
+You lose changes made since that backup, so prefer rolling forward with a fix.
 
 ## Single sign-on
 
@@ -70,12 +92,13 @@ Test a restore before you need one. The backup contains content, comments and th
 - [ ] `BRANDGUARD_AI_LOG=metadata` and a retention you have agreed with the brand owner (see PRIVACY.md)
 - [ ] `ANTHROPIC_API_KEY` set only if the brand approves sending text to the provider; users can still opt out per review
 - [ ] `/healthz` wired to the platform's health check; logs collected
+- [ ] Health check alert configured; smoke test passes through the public URL; one restore drill done (docs/TESTING.md)
 - [ ] `pip-audit` (CI runs it) is clean; dependabot enabled
 - [ ] Brand owners understand image checks use metadata, not pixels (SECURITY.md)
 
 ## Limits (honest list)
 
 - With a real AI provider the tone check runs in a background thread: the author sees rule findings at once, the page refreshes when the AI finishes, and submit is blocked meanwhile. The queue is in-process (2 threads per worker, 20 s deadline); a check cut short by a restart is marked "interrupted" at the next start. A separate job queue (Celery/RQ) is only needed at much larger scale. `BRANDGUARD_AI_ASYNC=0` makes it synchronous.
-- Rate limits are per process (in memory). Run behind a proxy that also limits, or one worker per instance, if that matters.
+- The sign-in throttle is shared by all workers on one machine (it lives in the database) and fails closed if the store is unreadable. Across several machines, move it and the database to shared services together.
 - One SQLite file means one machine. Postgres is the upgrade path; the SQL is plain and the migration list is the contract.
 - Two-step sign-in (authenticator app) is optional per user; there is no setting that forces it yet. TOTP secrets are stored in the database, so protect the database and its backups.

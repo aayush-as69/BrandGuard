@@ -50,3 +50,22 @@ def test_record_page_has_no_inline_script(seeded, login):
     html = login(MEERA).get(f"/api/content/{cid}/record").get_data(as_text=True)
     assert not re.search(r"\son[a-z]+\s*=", html) and "<script src=\"/static/print.js\">" in html
     assert "window.print" not in html
+
+
+def test_printable_record_never_contains_restricted_facts(seeded, login):
+    """The approval record is a page people print and forward: no confidential fact may appear in it for the author,
+    whatever happened to the finding that cited it (open, edited, or approved with it dismissed)."""
+    secrets = ("15 December", "2026-12-15", "launches on", "Brewline Signature Blend launches")
+    for author in (NEHA, RAHUL):
+        n = login(author)
+        cid = n.post("/api/content", title="Launch", body="We launch on 20 December.", images=[]).get_json()["id"]
+        flagged = next(f for f in n.get(f"/api/content/{cid}").get_json()["findings"] if f["source_id"] == "F-02")
+        pages = [n.get(f"/api/content/{cid}/record").get_data(as_text=True)]            # while open
+        n.post(f"/api/findings/{flagged['id']}/decide", action="edit", text="a date to be confirmed")
+        n.post(f"/api/content/{cid}/submit")
+        assert login(ARJUN).post(f"/api/content/{cid}/approve").status_code == 200
+        pages.append(n.get(f"/api/content/{cid}/record").get_data(as_text=True))        # after approval
+        pages.append(n.get(f"/api/content/{cid}").get_data(as_text=True))                # and the JSON behind the page
+        for page in pages:
+            for secret in secrets:
+                assert secret not in page, (author, secret)
