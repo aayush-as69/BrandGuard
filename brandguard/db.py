@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+import time
 from typing import Callable
 
 SCHEMA = """
@@ -227,9 +228,22 @@ def migrate(conn: sqlite3.Connection, migrations=None) -> list[int]:
     return applied
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switching to WAL needs a lock that SQLite's busy timeout does not always wait for, so retry briefly
+    when several processes start together. (Once the database is in WAL mode this is a no-op.)"""
+    for attempt in range(60):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or attempt == 59:
+                raise
+            time.sleep(0.25)
+
+
 def init(conn: sqlite3.Connection, demo_users: bool = True) -> None:
     """Create or upgrade the database. `demo_users` adds the five demo identities to an empty database."""
-    conn.execute("PRAGMA journal_mode=WAL")
+    _enable_wal(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")  # under the lock, so a second process can never move the version backwards
