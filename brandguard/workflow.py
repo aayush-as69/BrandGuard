@@ -520,8 +520,9 @@ def comment(conn, user: dict, content_id: int, body: str, finding_id: Optional[i
     if finding_id is not None:
         if isinstance(finding_id, bool) or not isinstance(finding_id, int):
             raise ValueError("finding_id must be a number")
-        if not conn.execute("SELECT 1 FROM findings WHERE id=? AND content_id=?", (finding_id, c["id"])).fetchone():
-            raise ValueError("That finding does not belong to this content")
+        if not conn.execute("SELECT 1 FROM findings WHERE id=? AND content_id=? AND version=?",
+                            (finding_id, c["id"], c["current_version"])).fetchone():
+            raise ValueError("That finding is not part of the current version of this content")
     conn.execute("INSERT INTO comments(content_id, finding_id, user_id, body, created_at) VALUES (?,?,?,?,?)",
                  (c["id"], finding_id, user["id"], body, now()))
     audit(conn, c["id"], user["id"], "comment", body[:120])

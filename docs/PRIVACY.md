@@ -19,6 +19,25 @@ By default the log keeps **metadata only**: when, which model, a SHA-256 of the 
 It cannot be turned back into the text. `BRANDGUARD_AI_LOG=full` also keeps the full prompt, for debugging; only admins can read
 the payload. Rows older than `BRANDGUARD_AI_RETENTION_DAYS` (default 30; `0` keeps nothing) are deleted on every AI call and at start.
 
+## Organisation-defined rules for the AI
+- `BRANDGUARD_AI_MASK_PATTERNS` = JSON like `{"CODENAME": "Project \\w+"}`: anything matching is masked like the built-in patterns.
+- `BRANDGUARD_AI_BLOCK_PATTERNS` = JSON like `{"EMBARGO": "(?i)embargoed"}`: content matching is never sent; the review says so and uses rules only.
+- A broken pattern setting blocks sending (it never means "send anyway"). `BRANDGUARD_LLM=off` is the organisation-wide opt-out.
+
+## Retention and deletion
+
+| Data | Kept | Removed by |
+|---|---|---|
+| AI request log | 30 days by default (`BRANDGUARD_AI_RETENTION_DAYS`); metadata only unless `BRANDGUARD_AI_LOG=full` | automatic purge on every AI call and at start |
+| Failed sign-in counters | 5 minutes | automatic |
+| Content, versions, findings, comments, audit trail | until someone asks for deletion or the brand owner's retention period ends | `python scripts/delete_content.py DB ID "reason" "operator"` |
+| Accounts | while active; deactivated accounts keep their name on past audit entries | deactivate in Users; remove by request with SQL after review |
+| Backups | as long as you keep them; they hold the same data | your backup storage's lifecycle rule (suggest 30-90 days) |
+
+Deleting content removes it from the live database and the AI log and leaves one audit line (who, when, why, never the content). **Older backups
+still contain it until they expire**, so tell requesters that and set the backup lifecycle to match your policy. Agree the retention period
+with the brand owner before go-live and write it here.
+
 ## Known gaps, stated plainly
 - Masking covers those five patterns only. Names, product codenames and unreleased plans written in plain words are still sent: tick
   "Use AI" off for anything that must not leave the server.

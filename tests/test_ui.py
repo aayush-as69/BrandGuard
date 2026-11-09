@@ -5,9 +5,10 @@ from pathlib import Path
 from brandguard.engine import contrast_ratio
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
-JS = (STATIC / "app.js").read_text(encoding="utf-8")
+JS_FILES = sorted((STATIC / "js").glob("*.js"))
+JS = "\n".join(f.read_text(encoding="utf-8") for f in JS_FILES)
 # markup, styles and script together: most UI tests check the page as a whole
-HTML = "\n".join((STATIC / n).read_text(encoding="utf-8") for n in ("index.html", "style.css", "app.js"))
+HTML = "\n".join((STATIC / n).read_text(encoding="utf-8") for n in ("index.html", "style.css")) + "\n" + JS
 
 
 def palette():
@@ -66,14 +67,16 @@ def test_page_script_has_no_syntax_errors():
     if not node:
         import pytest
         pytest.skip("node is not installed")
-    r = subprocess.run([node, "--check", str(STATIC / "app.js")], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr[:600]
+    assert JS_FILES, "no script files found"
+    for f in JS_FILES:
+        r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+        assert r.returncode == 0, f"{f.name}: {r.stderr[:600]}"
 
 
 def test_page_assets_are_linked_and_served(app):
     c = app.test_client()
     page = c.get("/").get_data(as_text=True)
-    for url, kind in (("/static/style.css", "text/css"), ("/static/app.js", "javascript")):
+    for url, kind in (("/static/style.css", "text/css"), ("/static/js/core.js", "javascript")):
         assert f'"{url}"' in page, url
         r = c.get(url)
         assert r.status_code == 200 and kind in r.content_type, (url, r.content_type)
@@ -89,3 +92,10 @@ def test_no_inline_script_and_strict_csp(app):
     assert "'unsafe-inline'" not in script_src and "'unsafe-eval'" not in script_src
     assert "object-src 'none'" in csp and "frame-ancestors 'none'" in csp
 
+
+
+def test_every_script_file_is_linked_once_and_in_dependency_order(app):
+    page = app.test_client().get("/").get_data(as_text=True)
+    linked = re.findall(r'src="/static/js/([a-z]+\.js)"', page)
+    assert sorted(linked) == sorted(f.name for f in JS_FILES) and len(set(linked)) == len(linked)
+    assert linked[0] == "core.js" and linked[-1] == "main.js"  # helpers first, dispatch and start-up last

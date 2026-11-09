@@ -124,6 +124,7 @@ import os
 import pytest
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("BRANDGUARD_LLM") == "off",
                     reason="live AI check: set ANTHROPIC_API_KEY (and have network access) to run")
 def test_live_provider_returns_parseable_findings():
@@ -157,3 +158,20 @@ def test_redaction_can_be_switched_off(ai_app, monkeypatch):
     monkeypatch.setenv("BRANDGUARD_AI_REDACT", "off")
     Session(ai_app, NEHA).post("/api/content", title="t", body="Write to ira@brewline.in, a cheap cup.", images=[])
     assert "ira@brewline.in" in ai_app.calls[0]
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("BRANDGUARD_LLM") == "off",
+                    reason="live AI check: set ANTHROPIC_API_KEY (and have network access) to run")
+def test_live_review_end_to_end_with_synthetic_data(tmp_path, monkeypatch):
+    """Whole path against the real provider: masking, request, parsing, verification. Synthetic Brewline text only."""
+    monkeypatch.setenv("BRANDGUARD_AI_ASYNC", "0")
+    app = create_app(str(tmp_path / "live.db"))  # no injected backend: the real default_call is used
+    Session(app, IRA).post("/api/kb/seed")
+    n = Session(app, NEHA)
+    cid = n.post("/api/content", title="Synthetic", images=[],
+                 body="Hey buddy! Our synthetic Brewline blend is a cheap way to wake up, mail synthetic@example.invalid.").get_json()["id"]
+    meta = n.get(f"/api/content/{cid}").get_json()["review_meta"]
+    assert meta["llm_status"].startswith("used"), meta["llm_status"]   # not "failed" or "skipped"
+    rows = _log_rows(app)
+    assert rows and "synthetic@example.invalid" not in json.dumps(rows)  # the address never reached the log either
