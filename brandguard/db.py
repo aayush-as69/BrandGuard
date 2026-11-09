@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+from typing import Callable
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
@@ -161,10 +162,86 @@ def connect(path: str) -> sqlite3.Connection:
     return conn
 
 
-def init(conn: sqlite3.Connection) -> None:
+# --------------------------------------------------------------------- migrations
+# SCHEMA above is version 1 (the baseline). Every later change is a numbered migration below, applied once,
+# in order, inside a transaction: either all of it happens and the version number moves, or none of it does.
+# NEVER edit a migration that has shipped; add a new one.
+def _m2_indexes(conn: sqlite3.Connection) -> None:
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_findings_content_version ON findings(content_id, version)",
+        "CREATE INDEX IF NOT EXISTS idx_findings_version_source ON findings(version, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_claims_content_version ON claims(content_id, version)",
+        "CREATE INDEX IF NOT EXISTS idx_comments_content ON comments(content_id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_content ON audit(content_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit(action, content_id)",
+        "CREATE INDEX IF NOT EXISTS idx_content_author_status ON content(author_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_content_status ON content(status)",
+        "CREATE INDEX IF NOT EXISTS idx_rules_guideline ON rules(guideline_id)",
+        "CREATE INDEX IF NOT EXISTS idx_llm_log_created ON llm_log(created_at)",
+    ):
+        conn.execute(stmt)
+
+
+def _m3_llm_log_metadata(conn: sqlite3.Connection) -> None:
+    """The AI log keeps audit metadata by default; the full prompt is optional (see llm.py)."""
+    for col in ("content_sha256 TEXT NOT NULL DEFAULT ''", "chars INTEGER NOT NULL DEFAULT 0",
+                "rules TEXT NOT NULL DEFAULT '[]'", "status TEXT NOT NULL DEFAULT ''"):
+        conn.execute(f"ALTER TABLE llm_log ADD COLUMN {col}")
+
+
+def _m4_accounts(conn: sqlite3.Connection) -> None:
+    for col in ("email TEXT", "password_hash TEXT", "active INTEGER NOT NULL DEFAULT 1",
+                "session_epoch INTEGER NOT NULL DEFAULT 0", "last_login TEXT"):
+        conn.execute(f"ALTER TABLE users ADD COLUMN {col}")
+    conn.execute("CREATE UNIQUE INDEX idx_users_email ON users(lower(email)) WHERE email IS NOT NULL")
+
+
+MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
+    (2, "indexes on the main query paths", _m2_indexes),
+    (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
+    (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
+]
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def migrate(conn: sqlite3.Connection, migrations=None) -> list[int]:
+    """Apply every migration newer than the database's version. Returns the versions applied.
+    Safe to run from several processes at once: the first to take the write lock does the work."""
+    applied: list[int] = []
+    for number, _, fn in (MIGRATIONS if migrations is None else migrations):
+        if schema_version(conn) >= number:
+            continue
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if schema_version(conn) < number:  # re-check: another process may have just done it
+                fn(conn)
+                conn.execute(f"PRAGMA user_version = {int(number)}")
+                applied.append(number)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return applied
+
+
+def init(conn: sqlite3.Connection, demo_users: bool = True) -> None:
+    """Create or upgrade the database. `demo_users` adds the five demo identities to an empty database."""
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
-    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")  # under the lock, so a second process can never move the version backwards
+    try:
+        if schema_version(conn) == 0:
+            conn.execute("PRAGMA user_version = 1")  # the baseline schema is in place
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    migrate(conn)
+    if demo_users and conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         conn.executemany(
             "INSERT INTO users(id, name, role, is_external) VALUES (?,?,?,?)", DEFAULT_USERS
         )

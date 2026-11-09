@@ -30,22 +30,26 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # 105 tests
+python -m pytest -q                      # ~155 tests (browser tests skip if Chromium is missing)
 ```
 
 ### Configuration (environment variables)
 
+Everything is listed, with comments, in [`.env.example`](.env.example). The ones that matter most:
+
 | Variable | Purpose |
 |---|---|
-| `BRANDGUARD_PASSCODE` | If set, every sign-in needs this passcode. Leave unset for local demos. |
-| `BRANDGUARD_ADMIN_PASSCODE` | Separate passcode for the admin user (defaults to `BRANDGUARD_PASSCODE`). |
-| `BRANDGUARD_SECRET` | Session signing key. If unset, one is generated and kept beside the database (`*.secret`, git-ignored). |
-| `BRANDGUARD_ENV=production` | Refuses to start unless `BRANDGUARD_SECRET` and `BRANDGUARD_PASSCODE` are set, and marks the session cookie `Secure` (serve over HTTPS). |
-| `BRANDGUARD_DB` | SQLite file path (default `brandguard.db`). |
-| `ANTHROPIC_API_KEY`, `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off` | Optional AI judge (see below). |
+| `BRANDGUARD_ENV=production` | Real deployment: needs `BRANDGUARD_SECRET`, uses real accounts, marks cookies `Secure` (serve over HTTPS). |
+| `BRANDGUARD_AUTH` | `accounts` (default in production: email + password, admin manages users) or `demo` (demo identities; in production it also needs `BRANDGUARD_PASSCODE`). |
+| `BRANDGUARD_ADMIN_EMAIL` / `_PASSWORD` | First start only: creates the first admin in accounts mode. |
+| `BRANDGUARD_DB` | SQLite file path (default `brandguard.db`). Migrations run automatically at start. |
+| `ANTHROPIC_API_KEY`, `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off`, `BRANDGUARD_AI_TIMEOUT` | Optional AI judge. |
+| `BRANDGUARD_AI_LOG`, `BRANDGUARD_AI_RETENTION_DAYS` | AI request log: metadata only by default, deleted after 30 days. |
+| `BRANDGUARD_LOG_JSON=1` | One JSON log line per request (never any content). `GET /healthz` is the health check. |
 
-Hosting: `gunicorn -w 1 --threads 4 "brandguard.app:create_app()"` (SQLite, so keep one worker process).
-A public URL must set `BRANDGUARD_ENV=production`; otherwise anyone could sign in as admin.
+Deployment, backup/restore, migrations and the production checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Data retention and what is sent to the AI: [docs/PRIVACY.md](docs/PRIVACY.md). Security model: [docs/SECURITY.md](docs/SECURITY.md).
+A `Dockerfile`, `render.yaml`, GitHub Actions CI (tests, browser tests, `pip-audit`) and dependabot config are included.
 
 Demo walkthrough: sign in as **Ira (admin)** → Knowledge base → *Load Brewline demo knowledge base*.
 Sign in as **Neha (agency creator)** → New → *Load demo email* → *Review now*.
@@ -62,7 +66,8 @@ brandguard/   engine.py (the checks)  workflow.py (roles, versions, approval)  k
 static/       index.html (markup)  style.css  app.js   - plain HTML/CSS/JS, no build step
 seed/         synthetic Brewline Coffee guidelines, facts, glossary, assets, settings, demo email
 scripts/      check_live_ai.py - end-to-end test of the real AI judge (needs a key and network)
-tests/        105 tests: engine, workflow, hardening, restricted facts, insights, record, UI, regressions
+docs/         deployment, privacy and security notes
+tests/        ~155 tests: engine, workflow, accounts, access control, migrations, AI privacy, multi-process, UI, browser (e2e/)
 ```
 
 ## Architecture and main decisions
@@ -86,15 +91,17 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 
 ## Testing
 
-`python -m pytest -q` runs 105 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
+`python -m pytest -q` runs about 155 tests, including: a guideline's confidential text never reaching a viewer without clearance; comments rejected for another version's finding; cross-site writes refused; real accounts with revocation; four processes writing one database; a real Chromium run through the tour; all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
 Writing these tests found and fixed several real bugs (an HTML page whose script silently failed to parse, a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, "a affordable" after a word swap, a 50,000-character post producing an ~800 MB response, a dismissal silently covering a later identical word, and highlights landing on the wrong text after an emoji).
 
-**Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, concurrent users, and user testing with real teams.
+**Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, a live deployment, and user testing with real teams.
 
 ## Known limitations
 
 - Single organisation: workspaces are not yet isolated per organisation.
-- SQLite with one writer: fine for a demo and a few users, not for heavy concurrent use (writes are guarded so conflicts are refused rather than corrupting versions).
+- SQLite with one writer: fine for a team, not for heavy concurrent use (writes are guarded so conflicts are refused rather than corrupting versions). Rate limits are per process.
+- The AI call runs inside the review request with a deadline (default 20 s); a queued background worker is not built. Rule findings never wait for it.
+- No SSO or multi-factor sign-in; the database is not encrypted by the app (use an encrypted disk). Text is not redacted before it goes to the AI (users can opt out per review).
 - Timestamps are stored in UTC and shown in the viewer's local time.
 - Sentence and claim detection are rule-based and English-only; unusual phrasing can be missed.
 - Rule-based fixes are minimal word swaps; stronger, intent-preserving rewrites are a Round 3 improvement.
@@ -103,13 +110,13 @@ Writing these tests found and fixed several real bugs (an HTML page whose script
 - A dismissal carries to a later version only for the same wording in the same sentence.
 - Glossary matching is for Latin script, including Hinglish. Devanagari terms are not matched reliably yet.
 - Claim extraction covers prices (₹/Rs/INR), dates, rankings, common superlatives and keyword facts, not every possible claim.
-- Images are described by name, alt text and colours entered by the user; vision-based reading of uploaded images is not built yet.
+- Image checks use metadata (name, alt text, colours entered by the user), not pixels; vision-based reading is not built yet.
 - Not a substitute for legal advice.
 
 ## Next steps
 
 1. Run `scripts/check_live_ai.py` with a real `ANTHROPIC_API_KEY`: the live call is the one path the tests cannot cover.
-2. Real per-user accounts (SSO or individual passwords) instead of the user switcher.
+2. SSO and multi-factor sign-in on top of the built-in accounts.
 3. Read uploaded images with a vision model, so alt text and contrast come from the image itself.
 4. Intent-preserving rewrites with a diff view, and privacy mode with leakage tests (redact secrets before AI calls).
 5. Per-organisation workspaces and PostgreSQL.

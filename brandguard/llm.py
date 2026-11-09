@@ -5,13 +5,18 @@ Grounding rules:
   * It must cite a rule code and quote the rule; the engine verifies both.
   * It must quote the flagged span verbatim; the engine verifies that too.
   * AI findings are labelled, capped at "medium" confidence, and never auto-applied.
-  * Everything sent out is written to llm_log so it can be disclosed.
+  * Every request is recorded in llm_log. By default only audit metadata is kept (when, which model, a
+    SHA-256 of the content, its length, which rules were sent, the outcome), not the content itself. Set
+    BRANDGUARD_AI_LOG=full to also keep the complete prompt. Rows are deleted after
+    BRANDGUARD_AI_RETENTION_DAYS (default 30).
 
 The judge is optional: with no ANTHROPIC_API_KEY the rule-based engine still
 runs and the review says the AI judge was not used.
 """
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -24,6 +29,7 @@ from .db import now
 from .models import Finding
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_RETENTION_DAYS = 30
 API_URL = "https://api.anthropic.com/v1/messages"
 
 SYSTEM = (
@@ -39,23 +45,38 @@ SYSTEM = (
 )
 
 
+def ai_timeout() -> float:
+    """Seconds one review may wait for the AI in total (BRANDGUARD_AI_TIMEOUT, default 20). The rule-based
+    findings never depend on it: when the AI is slow the review finishes without it and says so."""
+    try:
+        return max(1.0, float(os.environ.get("BRANDGUARD_AI_TIMEOUT", 20)))
+    except ValueError:
+        return 20.0
+
+
 def default_call(system: str, user: str, model: str) -> str:
-    """Call the Anthropic Messages API. Raises on any failure."""
+    """Call the Anthropic Messages API within a total deadline. Raises on any failure."""
     import requests
 
     key = os.environ["ANTHROPIC_API_KEY"]
+    deadline = time.monotonic() + ai_timeout()
     r = None
-    for attempt in range(2):  # one retry for rate limits and server hiccups
+    for attempt in range(2):  # one retry for rate limits and server hiccups, if the deadline allows
+        left = deadline - time.monotonic()
+        if left <= 0.5:
+            raise TimeoutError("AI deadline reached")
         r = requests.post(
             API_URL,
             headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": model, "max_tokens": 2000, "system": system,
+            json={"model": model, "max_tokens": 1500, "system": system,
                   "messages": [{"role": "user", "content": user}]},
-            timeout=30,
+            timeout=(5, left),
         )
         if r.status_code in (429, 500, 502, 503, 529) and attempt == 0:
-            time.sleep(min(float(r.headers.get("retry-after", 2) or 2), 5))
-            continue
+            wait = min(float(r.headers.get("retry-after", 2) or 2), 5)
+            if time.monotonic() + wait < deadline - 2:
+                time.sleep(wait)
+                continue
         break
     r.raise_for_status()
     return "".join(b.get("text", "") for b in r.json().get("content", []))
@@ -83,6 +104,34 @@ def _parse(text: str) -> list[dict]:
     raise ValueError("model did not return a JSON array")
 
 
+def log_mode() -> str:
+    return "full" if os.environ.get("BRANDGUARD_AI_LOG", "metadata").lower() == "full" else "metadata"
+
+
+def retention_days() -> int:
+    try:
+        return max(0, int(os.environ.get("BRANDGUARD_AI_RETENTION_DAYS", DEFAULT_RETENTION_DAYS)))
+    except ValueError:
+        return DEFAULT_RETENTION_DAYS
+
+
+def purge_log(conn: sqlite3.Connection) -> int:
+    """Delete AI log rows older than the retention period (0 days keeps nothing). Returns rows deleted."""
+    days = retention_days()
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat(timespec="seconds")
+    n = conn.execute("DELETE FROM llm_log WHERE created_at <= ?" if days == 0 else
+                     "DELETE FROM llm_log WHERE created_at < ?", (cutoff,)).rowcount
+    conn.commit()
+    return n
+
+
+def ai_available(call=None) -> bool:
+    """Is an AI backend configured? (A test can inject `call`.)"""
+    if call is not None:
+        return True
+    return bool(os.environ.get("ANTHROPIC_API_KEY")) and os.environ.get("BRANDGUARD_LLM", "on") != "off"
+
+
 def make_judge(
     conn: sqlite3.Connection,
     content_id: Optional[int] = None,
@@ -91,9 +140,9 @@ def make_judge(
     top_k: int = 4,
 ):
     """Build the judge callable for engine.review. Returns None if no AI backend is configured."""
+    if not ai_available(call):
+        return None
     if call is None:
-        if not os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("BRANDGUARD_LLM", "on") == "off":
-            return None
         call = default_call
     model = os.environ.get("BRANDGUARD_MODEL", DEFAULT_MODEL)
 
@@ -107,15 +156,25 @@ def make_judge(
             return [], "skipped: no relevant guideline rules retrieved"
         rules_text = "\n".join(f"{c}: {kb.rules[c]['text']}" for c in codes)
         user = f"BRAND RULES\n{rules_text}\n\n<content>\n{body}\n</content>"
-        conn.execute(
-            "INSERT INTO llm_log(content_id, version, model, payload, created_at) VALUES (?,?,?,?,?)",
-            (content_id, version, model, system_and_user(user), now()),
-        )
+        purge_log(conn)
+        log_id = conn.execute(
+            "INSERT INTO llm_log(content_id, version, model, payload, content_sha256, chars, rules, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (content_id, version, model, system_and_user(user) if log_mode() == "full" else "",
+             hashlib.sha256(body.encode("utf-8")).hexdigest(), len(body), json.dumps(codes), "sent", now()),
+        ).lastrowid
         conn.commit()
+
+        def outcome(status: str) -> None:
+            conn.execute("UPDATE llm_log SET status=? WHERE id=?", (status[:200], log_id))
+            conn.commit()
+
         try:
             items = _parse(call(SYSTEM, user, model))
         except Exception as exc:  # network, auth, bad JSON: never break the review
-            return [], f"failed: {type(exc).__name__}: {exc}"[:200]
+            status = f"failed: {type(exc).__name__}: {exc}"[:200]
+            outcome(status)
+            return [], status
 
         out: list[Finding] = []
         for it in items:
@@ -136,7 +195,9 @@ def make_judge(
                 ))
             except Exception:
                 continue  # malformed record: rejected by schema validation
-        return out, f"used {model}; {len(codes)} rules retrieved, {len(items)} suggestions returned"
+        status = f"used {model}; {len(codes)} rules retrieved, {len(items)} suggestions returned"
+        outcome(status)
+        return out, status
 
     return judge
 

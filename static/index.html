@@ -13,22 +13,31 @@
     <button data-tab="content" class="on">Content</button>
     <button data-tab="kb">Knowledge base</button>
     <button data-tab="insights">Insights</button>
+    <button data-tab="users" class="hidden">Users</button>
   </nav>
   <span class="sp"></span>
-  <button class="btn" onclick="tourStart()" aria-label="Take the guided tour">Tour</button>
+  <button class="btn tour-only" data-c="tourStart" aria-label="Take the guided tour">Tour</button>
   <label class="small muted" for="who">Signed in as</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off" style="width:130px">
   <select id="who" aria-label="Signed in as" style="width:auto"></select>
+  <form id="signin" class="hidden row" autocomplete="on">
+    <input type="email" id="email" placeholder="Email" aria-label="Email" autocomplete="username" required style="width:170px">
+    <input type="password" id="password" placeholder="Password" aria-label="Password" autocomplete="current-password" required style="width:130px">
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+  <span id="acct" class="hidden row"><span class="small muted" id="acct-name"></span>
+    <button class="btn" id="chpw" type="button">Change password</button>
+    <button class="btn" id="signout" type="button">Sign out</button></span>
 </header>
 <main id="main"><div class="card"><h2>Welcome to BrandGuard</h2>
   <p class="muted">Pick a user in the top right to begin. This demo uses synthetic data for a fictional brand, Brewline Coffee.</p>
-  <p><button class="btn primary" onclick="tourStart()">Take the 2-minute tour</button></p></div></main>
+  <p><button class="btn primary tour-only" data-c="tourStart">Take the 2-minute tour</button></p></div></main>
 <aside id="tour" class="hidden" role="dialog" aria-labelledby="tour-h" aria-live="polite">
   <div class="small muted" id="tour-n"></div><b id="tour-h"></b><p id="tour-t" class="small"></p>
-  <div class="row"><button class="btn" id="tour-b" onclick="tourStep(-1)">Back</button>
-   <button class="btn primary hidden" id="tour-do" onclick="tourDo()">Do it for me</button>
-   <button class="btn" id="tour-nx" onclick="tourStep(1)">Next</button>
-   <button class="btn" onclick="tourClose()" aria-label="Close the tour">Close</button></div>
+  <div class="row"><button class="btn" id="tour-b" data-c="tourStep" data-a='[-1]'>Back</button>
+   <button class="btn primary hidden" id="tour-do" data-c="tourDo">Do it for me</button>
+   <button class="btn" id="tour-nx" data-c="tourStep" data-a='[1]'>Next</button>
+   <button class="btn" data-c="tourClose" aria-label="Close the tour">Close</button></div>
 </aside>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
