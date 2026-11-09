@@ -12,27 +12,28 @@ HTML = "\n".join((STATIC / n).read_text(encoding="utf-8") for n in ("index.html"
 
 
 def palette():
-    return dict(re.findall(r"--(\w+):(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3}))\b", HTML))
+    return dict(re.findall(r"--([\w-]+):(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3}))(?![0-9a-fA-F])", HTML))
+
+
+# Colours that appear only as literals in the CSS (chips, marks, diffs, quotes), keyed by what they sit behind.
+CHIP_BG = {"#17304a": "#8fd8ff", "#232d49": "#b4bfd8", "#3b2f14": "amber", "#3d1d29": "red", "#123626": "green", "#2a2450": "violet"}
+SURFACE_BG = ("#0f2230", "#0a1122", "#1b2746")
 
 
 def test_every_text_and_background_pair_meets_4_5_to_1():
     p = palette()
-    pairs = [  # (text colour, background it is drawn on), taken from the CSS classes
-        (p["ink"], p["bg"]), (p["ink"], p["card"]),
-        (p["mute"], p["bg"]), (p["mute"], p["card"]), (p["mute"], "#eff4ff"), (p["mute"], "#f8fafc"),
-        (p["blue"], p["card"]), (p["blue"], "#eef2ff"), (p["blue"], "#f4f7ff"), ("#ffffff", p["blue"]),
-        (p["green"], p["card"]), (p["green"], "#f0fdf4"), ("#ffffff", p["green"]),
-        (p["amber"], p["card"]), (p["amber"], "#fff7ed"),
-        (p["red"], p["card"]), (p["red"], "#fef2f2"), ("#ffffff", p["red"]),
-        (p["purple"], "#f5f3ff"),
-        ("#475569", "#f1f5f9"),
-        (p["ink"], "#fecaca"), (p["ink"], "#fde68a"), (p["ink"], "#e2e8f0"),
-    ]
+    surfaces = [p["bg"], p["card"], p["sunk"], p["raised"]]
+    pairs = [(p["ink"], s) for s in surfaces] + [(p["mute"], s) for s in surfaces]
+    pairs += [(p[c], s) for c in ("accent", "green", "amber", "red", "violet") for s in (p["card"], p["sunk"])]
+    pairs += [(p["accent-ink"], p["accent"]), ("#06260f", p["green"]), ("#2a0709", p["red"]), (p["bg"], p["ink"])]  # buttons, toasts
+    pairs += [(fg if fg.startswith("#") else p[fg], bg) for bg, fg in CHIP_BG.items()]
+    pairs += [(p["ink"], bg) for bg in ("#6b2437", "#5e4915", "#33406a")]          # highlighted text in a review
+    pairs += [("#ffd0d0", "#552030"), ("#c2f5da", "#14442f"), (p["accent"], "#0f2230"), (p["ink"], "#0f2230"), ("#cfe7ff", "#1b2746"),
+              (p["ink"], "#0a1122"), ("#7f8ba8", p["sunk"])]                       # diff, quote, code, placeholder
     failures = [(fg, bg, round(contrast_ratio(fg, bg), 2)) for fg, bg in pairs if contrast_ratio(fg, bg) < 4.5]
     assert not failures, failures
-    for bg in ("#eff4ff", "#f8fafc", "#eef2ff", "#f4f7ff", "#f0fdf4", "#fff7ed", "#fef2f2", "#f5f3ff", "#f1f5f9"):
-        assert bg in HTML  # the pairs above really are the ones used in the CSS
-
+    for literal in list(CHIP_BG) + list(SURFACE_BG) + ["#6b2437", "#5e4915", "#33406a", "#552030", "#14442f", "#7f8ba8"]:
+        assert literal in HTML, literal  # the pairs above really are the ones used in the CSS
 
 def test_server_values_are_escaped_before_reaching_html():
     for raw in ("${f.severity}", "${c.status}", "${x.status}", "${m.role}", "${f.confidence}",
