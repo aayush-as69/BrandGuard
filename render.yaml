@@ -1,0 +1,16 @@
+# Render blueprint: a production deployment with real accounts and a persistent disk for the database.
+services:
+  - type: web
+    name: brandguard
+    runtime: docker
+    healthCheckPath: /healthz
+    disk: { name: data, mountPath: /data, sizeGB: 1 }
+    envVars:
+      - { key: BRANDGUARD_ENV, value: production }
+      - { key: BRANDGUARD_AUTH, value: accounts }
+      - { key: BRANDGUARD_SECRET, generateValue: true }
+      - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
+      - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
+      - { key: BRANDGUARD_AI_LOG, value: metadata }
+      - { key: BRANDGUARD_AI_RETENTION_DAYS, value: "30" }
+      - { key: ANTHROPIC_API_KEY, sync: false }

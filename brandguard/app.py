@@ -11,6 +11,7 @@ from pathlib import Path
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db as dbm
 from . import insights
@@ -55,17 +56,51 @@ def _persistent_secret(db_path: str) -> str:
         return secrets.token_hex(32)  # read-only disk: fine for a demo, sessions reset on restart
 
 
+MIN_PASSWORD = 10
+ROLES = ("creator", "manager", "reviewer", "admin")
+_DUMMY_HASH = generate_password_hash("not-a-real-password")
+
+
+def _check_password_strength(pw: str) -> str:
+    if not isinstance(pw, str) or len(pw) < MIN_PASSWORD:
+        raise ValueError(f"Password must be at least {MIN_PASSWORD} characters")
+    return pw
+
+
+def _bootstrap_admin(c: sqlite3.Connection, required: bool) -> None:
+    """Make sure a real deployment has someone who can sign in and add everyone else."""
+    if c.execute("SELECT 1 FROM users WHERE role='admin' AND active=1 AND password_hash IS NOT NULL").fetchone():
+        return
+    email = os.environ.get("BRANDGUARD_ADMIN_EMAIL", "").strip().lower()
+    password = os.environ.get("BRANDGUARD_ADMIN_PASSWORD", "")
+    if not email or not password:
+        if required:
+            raise RuntimeError("Accounts mode has no admin yet: set BRANDGUARD_ADMIN_EMAIL and BRANDGUARD_ADMIN_PASSWORD "
+                               "for the first start (you can remove them afterwards).")
+        return
+    _check_password_strength(password)
+    c.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
+              ("Administrator", "admin", 0, email, generate_password_hash(password)))
+    c.commit()
+
+
 def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     """llm_call(system, user, model) -> str lets tests (or a private model) replace the AI backend."""
     app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
     production = os.environ.get("BRANDGUARD_ENV") == "production"
+    auth_mode = os.environ.get("BRANDGUARD_AUTH") or ("accounts" if production else "demo")
+    if auth_mode not in ("demo", "accounts"):
+        raise RuntimeError("BRANDGUARD_AUTH must be 'accounts' or 'demo'")
     passcode = os.environ.get("BRANDGUARD_PASSCODE", "")
     admin_passcode = os.environ.get("BRANDGUARD_ADMIN_PASSCODE", "") or passcode
     secret = os.environ.get("BRANDGUARD_SECRET", "")
-    if production and not (secret and passcode):
+    if production and not secret:
+        raise RuntimeError("BRANDGUARD_ENV=production needs BRANDGUARD_SECRET (the session signing key).")
+    if production and auth_mode == "demo" and not passcode:
         raise RuntimeError(
-            "BRANDGUARD_ENV=production needs BRANDGUARD_SECRET and BRANDGUARD_PASSCODE. "
-            "Without them anyone could sign in as admin.")
+            "BRANDGUARD_AUTH=demo in production needs BRANDGUARD_PASSCODE. Without it anyone could sign in as admin. "
+            "Use BRANDGUARD_AUTH=accounts for a real deployment.")
+    accounts = auth_mode == "accounts"
     db_file = db_path or os.environ.get("BRANDGUARD_DB", str(ROOT / "brandguard.db"))
     app.config.update(
         SECRET_KEY=secret or _persistent_secret(db_file),
@@ -75,12 +110,16 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=production,
+        PERMANENT_SESSION_LIFETIME=8 * 3600,  # sign-in lasts a working day at most
     )
     failures: dict[str, list[float]] = {}  # wrong-passcode attempts per address
 
     boot = dbm.connect(app.config["DB_PATH"])
     try:
-        dbm.init(boot)
+        dbm.init(boot, demo_users=not accounts)
+        if accounts:
+            _bootstrap_admin(boot, production)
+        llm.purge_log(boot)  # honour the retention period at every start
     finally:
         boot.close()
 
@@ -99,12 +138,58 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def me() -> dict:
         uid = session.get("uid")
         row = conn().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone() if uid else None
-        if not row:
-            raise AuthError("Pick a user first")
-        return dict(row)
+        if not row or not row["active"] or session.get("epoch", 0) != row["session_epoch"]:
+            raise AuthError("Please sign in")
+        user = dict(row)
+        user.pop("password_hash", None)
+        return user
+
+    def ai_mode(data: dict) -> str:
+        """"fresh" unless the author switched AI review off for this request."""
+        flag = data.get("use_ai", True)
+        if not isinstance(flag, bool):
+            raise ValueError("use_ai must be true or false")
+        return "fresh" if flag else "off"
 
     def judge_factory(c, content_id, version):
         return llm.make_judge(c, content_id, version, call=app.config["LLM_CALL"])
+
+    @app.before_request
+    def guard_origin():
+        """Refuse cross-site writes: a state-changing request must come from this site."""
+        g.t0 = time.perf_counter()
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            if request.headers.get("Sec-Fetch-Site") == "cross-site":
+                return jsonify(error="Cross-site request refused"), 403
+            origin = request.headers.get("Origin")
+            if origin and origin != "null":
+                allowed = {request.host_url.rstrip("/")}
+                allowed.update(o.strip().rstrip("/") for o in
+                               os.environ.get("BRANDGUARD_ALLOWED_ORIGINS", "").split(",") if o.strip())
+                if origin.rstrip("/") not in allowed:
+                    return jsonify(error="Cross-site request refused"), 403
+            elif origin == "null":
+                return jsonify(error="Cross-site request refused"), 403
+        return None
+
+    @app.get("/healthz")
+    def healthz():
+        try:
+            version = dbm.schema_version(conn())
+            conn().execute("SELECT 1").fetchone()
+        except Exception:
+            app.logger.exception("health check failed")
+            return jsonify(status="error"), 503
+        return jsonify(status="ok", schema_version=version)
+
+    @app.after_request
+    def access_log(resp):
+        if os.environ.get("BRANDGUARD_LOG_JSON") == "1":
+            print(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "method": request.method, "path": request.path,
+                "status": resp.status_code, "user": session.get("uid"),
+                "ms": round((time.perf_counter() - g.get("t0", time.perf_counter())) * 1000, 1)}), flush=True)
+        return resp
 
     @app.after_request
     def security_headers(resp):
@@ -113,8 +198,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
         resp.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; frame-ancestors 'none'")
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
         if request.path.startswith("/api/"):
             resp.headers["Cache-Control"] = "no-store"
         return resp
@@ -164,32 +249,142 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     # --------------------------------------------------------------------- auth
     @app.get("/api/users")
     def users():
-        rows = conn().execute("SELECT id, name, role, is_external FROM users ORDER BY id")
+        if accounts:  # a real deployment never publishes who has an account
+            if me()["role"] != "admin":
+                raise Forbidden("Only an admin can list accounts")
+            rows = conn().execute("SELECT id, name, role, is_external, email, active, last_login FROM users ORDER BY id")
+        else:
+            rows = conn().execute("SELECT id, name, role, is_external FROM users ORDER BY id")
         return jsonify([dict(r) for r in rows])
 
     @app.get("/api/config")
     def config():
-        return jsonify(passcode_required=bool(passcode or admin_passcode))
+        ai_on = llm.ai_available(app.config["LLM_CALL"])
+        return jsonify(
+            auth=auth_mode,
+            passcode_required=bool(not accounts and (passcode or admin_passcode)),
+            ai={"enabled": ai_on, "provider": "Anthropic", "log": llm.log_mode(), "retention_days": llm.retention_days(),
+                "notice": ("When AI review is on, the text of your content and the few guideline rules that match it are "
+                           "sent to Anthropic's API to judge tone. Nothing else is sent. You can switch it off for any "
+                           f"review. A record of each request is kept for {llm.retention_days()} days "
+                           + ("including the full text sent." if llm.log_mode() == "full" else "without the text itself."))
+                if ai_on else ""},
+        )
+
+    def throttle(key: str) -> None:
+        now_ = time.time()
+        failures[key] = [t for t in failures.get(key, []) if now_ - t < 300]
+        if len(failures[key]) >= 10:
+            raise RateLimited("Too many failed attempts. Try again in a few minutes.")
+
+    def start_session(row) -> None:
+        session.clear()
+        session.permanent = True
+        session["uid"] = row["id"]
+        session["epoch"] = row["session_epoch"]
 
     @app.post("/api/login")
     def login():
         data = payload()
-        row = conn().execute("SELECT * FROM users WHERE id=?", (data.get("user_id"),)).fetchone()
+        c = conn()
+        if accounts:
+            email = str(data.get("email") or "").strip().lower()
+            who = request.remote_addr or "?"
+            throttle(who)
+            throttle("email:" + email)
+            row = c.execute("SELECT * FROM users WHERE lower(email)=? AND active=1", (email,)).fetchone() if email else None
+            good = check_password_hash(row["password_hash"] if row and row["password_hash"] else _DUMMY_HASH,
+                                       str(data.get("password") or ""))
+            if not (row and row["password_hash"] and good):
+                failures.setdefault(who, []).append(time.time())
+                failures.setdefault("email:" + email, []).append(time.time())
+                raise AuthError("Wrong email or password")
+            c.execute("UPDATE users SET last_login=? WHERE id=?", (dbm.now(), row["id"]))
+            c.commit()
+        else:
+            row = c.execute("SELECT * FROM users WHERE id=?", (data.get("user_id"),)).fetchone()
+            if not row:
+                raise NotFound("No such user")
+            expected = admin_passcode if row["role"] == "admin" else passcode
+            if expected:
+                who = request.remote_addr or "?"
+                throttle(who)
+                given = str(data.get("passcode") or "")
+                if not hmac.compare_digest(given.encode(), expected.encode()):
+                    failures.setdefault(who, []).append(time.time())
+                    raise Forbidden("Wrong passcode")
+        start_session(row)
+        return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})
+
+    @app.post("/api/password")
+    def change_password():
+        user, data = me(), payload()
+        c = conn()
+        row = c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
+        if not row["password_hash"] or not check_password_hash(row["password_hash"], str(data.get("current") or "")):
+            raise Forbidden("Current password is wrong")
+        c.execute("UPDATE users SET password_hash=?, session_epoch=session_epoch+1 WHERE id=?",
+                  (generate_password_hash(_check_password_strength(data.get("new"))), user["id"]))
+        c.commit()
+        start_session(c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone())  # other devices are signed out
+        return jsonify(ok=True)
+
+    def admin_only() -> dict:
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can manage accounts")
+        return user
+
+    def other_admins(c, user_id: int) -> int:
+        return c.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1 AND id<>?", (user_id,)).fetchone()[0]
+
+    @app.post("/api/users")
+    def create_user():
+        admin_only()
+        data, c = payload(), conn()
+        name, email = str(data.get("name") or "").strip(), str(data.get("email") or "").strip().lower()
+        role = data.get("role")
+        if not name or "@" not in email:
+            raise ValueError("A name and a valid email are required")
+        if role not in ROLES:
+            raise ValueError("Role must be one of: " + ", ".join(ROLES))
+        if role == "admin" and data.get("is_external"):
+            raise ValueError("An agency (external) user cannot be an admin")
+        pw = generate_password_hash(_check_password_strength(data.get("password")))
+        cur = c.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
+                        (name, role, 1 if data.get("is_external") else 0, email, pw))
+        c.commit()
+        return jsonify(id=cur.lastrowid), 201
+
+    @app.patch("/api/users/<int:user_id>")
+    def update_user(user_id: int):
+        admin = admin_only()
+        data, c = payload(), conn()
+        row = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not row:
             raise NotFound("No such user")
-        expected = admin_passcode if row["role"] == "admin" else passcode
-        if expected:
-            who, now_ = request.remote_addr or "?", time.time()
-            failures[who] = [t for t in failures.get(who, []) if now_ - t < 300]
-            if len(failures[who]) >= 10:
-                raise RateLimited("Too many wrong passcodes. Try again in a few minutes.")
-            given = str(data.get("passcode") or "")
-            if not hmac.compare_digest(given.encode(), expected.encode()):
-                failures[who].append(now_)
-                raise Forbidden("Wrong passcode")
-        session.clear()
-        session["uid"] = row["id"]
-        return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})
+        role = data.get("role", row["role"])
+        active = 1 if data.get("active", bool(row["active"])) else 0
+        external = 1 if data.get("is_external", bool(row["is_external"])) else 0
+        if role not in ROLES:
+            raise ValueError("Role must be one of: " + ", ".join(ROLES))
+        if role == "admin" and external:
+            raise ValueError("An agency (external) user cannot be an admin")
+        if row["role"] == "admin" and (role != "admin" or not active) and other_admins(c, user_id) == 0:
+            raise ValueError("There must always be at least one active admin")
+        sets, args = ["role=?", "active=?", "is_external=?"], [role, active, external]
+        if "name" in data and str(data["name"]).strip():
+            sets.append("name=?"); args.append(str(data["name"]).strip())
+        # anything that changes what someone may do, or a new password, ends their current sign-ins
+        if data.get("password") or role != row["role"] or active != row["active"] or external != row["is_external"]:
+            sets.append("session_epoch=session_epoch+1")
+        if data.get("password"):
+            sets.append("password_hash=?"); args.append(generate_password_hash(_check_password_strength(data["password"])))
+        c.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", (*args, user_id))
+        c.commit()
+        if user_id == admin["id"]:  # an admin editing themselves stays signed in
+            start_session(c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+        return jsonify(ok=True)
 
     @app.post("/api/logout")
     def logout():
@@ -310,18 +505,27 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.get("/api/content")
     def content_list():
-        return jsonify(wf.list_content(conn(), me()))
+        user = me()
+        try:
+            limit = min(200, max(1, int(request.args.get("limit", 50))))
+            offset = max(0, int(request.args.get("offset", 0)))
+        except ValueError:
+            raise ValueError("limit and offset must be whole numbers")
+        resp = jsonify(wf.list_content(conn(), user, limit, offset))
+        resp.headers["X-Total-Count"] = str(wf.count_content(conn(), user))
+        return resp
 
     @app.post("/api/content")
     def content_create():
         user, data = me(), payload()
-        cid = wf.create_content(conn(), user, data.get("title"), data.get("body"), data.get("images"), judge_factory)
+        cid = wf.create_content(conn(), user, data.get("title"), data.get("body"), data.get("images"), judge_factory,
+                                ai_mode(data))
         return jsonify(id=cid), 201
 
     def detail_payload(user: dict, c: sqlite3.Connection, cid: int) -> dict:
         content = wf.get_content(c, user, cid)
         v = wf.current(c, content)
-        visible = wf.visible_facts(c, user)
+        visible = wf.visible_sources(c, user)
         findings = [finding_dict(r, visible) for r in c.execute(
             "SELECT f.*, u.name AS decided_by_name FROM findings f LEFT JOIN users u ON u.id=f.decided_by "
             "WHERE f.content_id=? AND f.version=? ORDER BY CASE WHEN f.span_start<0 THEN 1 ELSE 0 END, f.span_start, f.id",
@@ -374,7 +578,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/content/<int:cid>/revise")
     def content_revise(cid: int):
         data = payload()
-        ver = wf.revise(conn(), me(), cid, data.get("body"), data.get("images"), judge_factory)
+        ver = wf.revise(conn(), me(), cid, data.get("body"), data.get("images"), judge_factory, ai_mode(data))
         return jsonify(version=ver)
 
     @app.post("/api/content/<int:cid>/review")
@@ -385,7 +589,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise Forbidden("You cannot re-run the review on this content")
         if content["status"] == "approved":
             raise Forbidden("Approved content is locked")
-        return jsonify(wf.run_review(conn(), cid, judge_factory))
+        return jsonify(wf.run_review(conn(), cid, judge_factory, ai_mode(request.get_json(silent=True) or {})))
 
     @app.post("/api/findings/<int:fid>/decide")
     def finding_decide(fid: int):
@@ -422,9 +626,19 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.get("/api/llm-log")
     def llm_log():
-        if me()["role"] not in ("admin", "manager", "reviewer"):
+        """Record of what was sent to the AI service. Managers and reviewers see the metadata; the full text of a
+        request (only kept when BRANDGUARD_AI_LOG=full) is for admins."""
+        user = me()
+        if user["role"] not in ("admin", "manager", "reviewer"):
             raise Forbidden("Not allowed")
-        rows = conn().execute("SELECT id, content_id, version, model, payload, created_at FROM llm_log ORDER BY id DESC LIMIT 50")
-        return jsonify([dict(r) for r in rows])
+        rows = [dict(r) for r in conn().execute(
+            "SELECT id, content_id, version, model, content_sha256, chars, rules, status, payload, created_at "
+            "FROM llm_log ORDER BY id DESC LIMIT 50")]
+        for r in rows:
+            r["rules"] = json.loads(r["rules"] or "[]")
+            r["has_payload"] = bool(r["payload"])
+            if user["role"] != "admin":
+                del r["payload"]
+        return jsonify(rows)
 
     return app
