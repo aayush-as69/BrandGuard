@@ -174,6 +174,24 @@ def _norm(s: str) -> str:
 
 
 # ------------------------------------------------------------------ verification
+def ai_pass(kb, body: str, images: list[dict], existing: list, judge) -> tuple[list[Finding], list[str], str]:
+    """Run only the AI judge over a body that rule-based findings already cover. `existing` needs span_start,
+    span_end and target. Returns (accepted findings, rejected notes, status). Same verification as a full review."""
+    got, status = judge(body, kb, list(existing))
+    accepted: list[Finding] = []
+    rejected: list[str] = []
+    for f in got:
+        reason = verify(f, kb, body, images)
+        if reason:
+            rejected.append(f"[AI] {f.issue} ({reason})")
+        elif any(f.span_start < o.span_end and o.span_start < f.span_end
+                 for o in list(existing) + accepted if o.target == "body" and f.target == "body"):
+            continue
+        else:
+            accepted.append(f)
+    return accepted, rejected, status
+
+
 def verify(f: Finding, kb: KB, body: str, images: list[dict]) -> Optional[str]:
     """Return None if the finding is trustworthy, otherwise the reason it is rejected."""
     if f.source_type == "guideline":

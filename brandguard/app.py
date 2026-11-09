@@ -7,6 +7,7 @@ import os
 import secrets
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
@@ -15,7 +16,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db as dbm
 from . import insights
+from . import imaging
 from . import record
+from . import totp
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -101,6 +104,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "BRANDGUARD_AUTH=demo in production needs BRANDGUARD_PASSCODE. Without it anyone could sign in as admin. "
             "Use BRANDGUARD_AUTH=accounts for a real deployment.")
     accounts = auth_mode == "accounts"
+    sso_header = os.environ.get("BRANDGUARD_SSO_EMAIL_HEADER", "")
+    sso_secret = os.environ.get("BRANDGUARD_SSO_SECRET", "") if accounts and sso_header else ""
+    if sso_header and accounts and len(sso_secret) < 16:
+        raise RuntimeError("BRANDGUARD_SSO_EMAIL_HEADER needs BRANDGUARD_SSO_SECRET of at least 16 characters")
     db_file = db_path or os.environ.get("BRANDGUARD_DB", str(ROOT / "brandguard.db"))
     app.config.update(
         SECRET_KEY=secret or _persistent_secret(db_file),
@@ -119,6 +126,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         dbm.init(boot, demo_users=not accounts)
         if accounts:
             _bootstrap_admin(boot, production)
+        wf.settle_interrupted_reviews(boot)
         llm.purge_log(boot)  # honour the retention period at every start
     finally:
         boot.close()
@@ -142,6 +150,9 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise AuthError("Please sign in")
         user = dict(row)
         user.pop("password_hash", None)
+        user["mfa"] = bool(user.get("totp_secret"))
+        for secret_col in ("totp_secret", "totp_pending", "totp_last"):
+            user.pop(secret_col, None)
         return user
 
     def ai_mode(data: dict) -> str:
@@ -153,6 +164,25 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     def judge_factory(c, content_id, version):
         return llm.make_judge(c, content_id, version, call=app.config["LLM_CALL"])
+
+    # With a real provider the AI check runs in the background so the author sees rule findings at once.
+    # (An injected test backend stays synchronous unless BRANDGUARD_AI_ASYNC=1.)
+    ai_async = (os.environ.get("BRANDGUARD_AI_ASYNC") == "1"
+                or (llm_call is None and os.environ.get("BRANDGUARD_AI_ASYNC", "1") != "0"))
+    app.ai_futures = []
+    if ai_async:
+        pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-review")
+
+        def run_ai_job(content_id: int, version: int) -> None:
+            c = dbm.connect(app.config["DB_PATH"])
+            try:
+                wf.complete_ai_review(c, content_id, version, judge_factory)
+            except Exception:
+                app.logger.exception("AI review job failed")
+            finally:
+                c.close()
+
+        judge_factory.schedule = lambda cid, ver: app.ai_futures.append(pool.submit(run_ai_job, cid, ver))
 
     @app.before_request
     def guard_origin():
@@ -252,7 +282,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if accounts:  # a real deployment never publishes who has an account
             if me()["role"] != "admin":
                 raise Forbidden("Only an admin can list accounts")
-            rows = conn().execute("SELECT id, name, role, is_external, email, active, last_login FROM users ORDER BY id")
+            rows = conn().execute("SELECT id, name, role, is_external, email, active, last_login, (totp_secret IS NOT NULL) AS mfa FROM users ORDER BY id")
         else:
             rows = conn().execute("SELECT id, name, role, is_external FROM users ORDER BY id")
         return jsonify([dict(r) for r in rows])
@@ -261,11 +291,14 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def config():
         ai_on = llm.ai_available(app.config["LLM_CALL"])
         return jsonify(
-            auth=auth_mode,
+            auth=auth_mode, sso=bool(sso_secret),
             passcode_required=bool(not accounts and (passcode or admin_passcode)),
             ai={"enabled": ai_on, "provider": "Anthropic", "log": llm.log_mode(), "retention_days": llm.retention_days(),
+                "redaction": llm.redact_enabled(),
                 "notice": ("When AI review is on, the text of your content and the few guideline rules that match it are "
-                           "sent to Anthropic's API to judge tone. Nothing else is sent. You can switch it off for any "
+                           "sent to Anthropic's API to judge tone"
+                           + (", with email addresses, links, money amounts, phone numbers and @handles masked first" if llm.redact_enabled() else "")
+                           + ". Nothing else is sent. You can switch it off for any "
                            f"review. A record of each request is kept for {llm.retention_days()} days "
                            + ("including the full text sent." if llm.log_mode() == "full" else "without the text itself."))
                 if ai_on else ""},
@@ -299,6 +332,14 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                 failures.setdefault(who, []).append(time.time())
                 failures.setdefault("email:" + email, []).append(time.time())
                 raise AuthError("Wrong email or password")
+            if row["totp_secret"]:
+                step = totp.verify(row["totp_secret"], str(data.get("code") or ""), row["totp_last"]) if data.get("code") else None
+                if step is None:
+                    if data.get("code"):  # a wrong code counts like a wrong password
+                        failures.setdefault(who, []).append(time.time())
+                        failures.setdefault("email:" + email, []).append(time.time())
+                    return jsonify(error="Enter the 6-digit code from your authenticator app", mfa_required=True), 401
+                c.execute("UPDATE users SET totp_last=? WHERE id=?", (step, row["id"]))
             c.execute("UPDATE users SET last_login=? WHERE id=?", (dbm.now(), row["id"]))
             c.commit()
         else:
@@ -327,6 +368,71 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                   (generate_password_hash(_check_password_strength(data.get("new"))), user["id"]))
         c.commit()
         start_session(c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone())  # other devices are signed out
+        return jsonify(ok=True)
+
+    @app.post("/api/sso/login")
+    def sso_login():
+        """Sign in via an identity-aware reverse proxy (oauth2-proxy, Cloudflare Access, ...). The proxy must strip these
+        headers from client requests and add them itself; the shared secret proves the request came through it."""
+        if not sso_secret:
+            raise NotFound("Single sign-on is not configured")
+        given = request.headers.get("X-SSO-Secret", "")
+        email = request.headers.get(sso_header, "").strip().lower()
+        if not hmac.compare_digest(given.encode(), sso_secret.encode()) or not email:
+            raise AuthError("Single sign-on failed")
+        c = conn()
+        row = c.execute("SELECT * FROM users WHERE lower(email)=? AND active=1", (email,)).fetchone()
+        if not row:
+            raise Forbidden("No BrandGuard account for this identity. Ask an admin to add you.")
+        c.execute("UPDATE users SET last_login=? WHERE id=?", (dbm.now(), row["id"]))
+        c.commit()
+        start_session(row)
+        return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})
+
+    @app.post("/api/image/analyze")
+    def image_analyze():
+        me()
+        f = request.files.get("image")
+        if not f:
+            raise ValueError("Attach an image file")
+        try:
+            return jsonify(imaging.analyse(f.read(imaging.MAX_BYTES + 1)))
+        except imaging.ImageError as exc:
+            raise ValueError(str(exc))
+
+    @app.post("/api/mfa/setup")
+    def mfa_setup():
+        user = me()
+        secret = totp.new_secret()
+        conn().execute("UPDATE users SET totp_pending=? WHERE id=?", (secret, user["id"]))
+        conn().commit()
+        return jsonify(secret=secret, uri=totp.uri(secret, user.get("email") or user["name"]))
+
+    @app.post("/api/mfa/enable")
+    def mfa_enable():
+        user, data, c = me(), payload(), conn()
+        row = c.execute("SELECT totp_pending FROM users WHERE id=?", (user["id"],)).fetchone()
+        step = totp.verify(row["totp_pending"], str(data.get("code") or "")) if row["totp_pending"] else None
+        if step is None:
+            raise ValueError("That code is not right. Check the time on your phone and try the next code.")
+        c.execute("UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_last=?, session_epoch=session_epoch+1 WHERE id=?",
+                  (step, user["id"]))
+        c.commit()
+        start_session(c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone())
+        return jsonify(ok=True)
+
+    @app.post("/api/mfa/disable")
+    def mfa_disable():
+        user, data, c = me(), payload(), conn()
+        row = c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
+        if not row["totp_secret"]:
+            raise ValueError("Two-step sign-in is not on")
+        if not check_password_hash(row["password_hash"] or _DUMMY_HASH, str(data.get("password") or "")) \
+                or totp.verify(row["totp_secret"], str(data.get("code") or ""), row["totp_last"]) is None:
+            raise Forbidden("Password or code is wrong")
+        c.execute("UPDATE users SET totp_secret=NULL, totp_pending=NULL, session_epoch=session_epoch+1 WHERE id=?", (user["id"],))
+        c.commit()
+        start_session(c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone())
         return jsonify(ok=True)
 
     def admin_only() -> dict:
@@ -376,7 +482,9 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if "name" in data and str(data["name"]).strip():
             sets.append("name=?"); args.append(str(data["name"]).strip())
         # anything that changes what someone may do, or a new password, ends their current sign-ins
-        if data.get("password") or role != row["role"] or active != row["active"] or external != row["is_external"]:
+        if data.get("reset_mfa"):  # lost phone: the admin clears it, the person sets it up again
+            sets.append("totp_secret=NULL"); sets.append("totp_pending=NULL")
+        if data.get("password") or data.get("reset_mfa") or role != row["role"] or active != row["active"] or external != row["is_external"]:
             sets.append("session_epoch=session_epoch+1")
         if data.get("password"):
             sets.append("password_hash=?"); args.append(generate_password_hash(_check_password_strength(data["password"])))
