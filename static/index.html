@@ -23,9 +23,11 @@
   <form id="signin" class="hidden row" autocomplete="on">
     <input type="email" id="email" placeholder="Email" aria-label="Email" autocomplete="username" required style="width:170px">
     <input type="password" id="password" placeholder="Password" aria-label="Password" autocomplete="current-password" required style="width:130px">
+    <input type="text" id="code" class="hidden" inputmode="numeric" pattern="[0-9 ]*" placeholder="6-digit code" aria-label="Authenticator code" autocomplete="one-time-code" style="width:110px">
     <button class="btn primary" type="submit">Sign in</button>
   </form>
   <span id="acct" class="hidden row"><span class="small muted" id="acct-name"></span>
+    <button class="btn" id="mfa" type="button">Two-step sign-in</button>
     <button class="btn" id="chpw" type="button">Change password</button>
     <button class="btn" id="signout" type="button">Sign out</button></span>
 </header>

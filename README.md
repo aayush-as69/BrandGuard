@@ -30,7 +30,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # ~155 tests (browser tests skip if Chromium is missing)
+python -m pytest -q                      # ~170 tests (browser tests skip if Chromium is missing)
 ```
 
 ### Configuration (environment variables)
@@ -45,6 +45,8 @@ Everything is listed, with comments, in [`.env.example`](.env.example). The ones
 | `BRANDGUARD_DB` | SQLite file path (default `brandguard.db`). Migrations run automatically at start. |
 | `ANTHROPIC_API_KEY`, `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off`, `BRANDGUARD_AI_TIMEOUT` | Optional AI judge. |
 | `BRANDGUARD_AI_LOG`, `BRANDGUARD_AI_RETENTION_DAYS` | AI request log: metadata only by default, deleted after 30 days. |
+| `BRANDGUARD_AI_REDACT`, `BRANDGUARD_AI_ASYNC` | Mask emails/links/amounts/phones before the AI sees text (default on); run the AI check in the background (default on with a real provider). |
+| `BRANDGUARD_SSO_EMAIL_HEADER`, `BRANDGUARD_SSO_SECRET` | Sign-in through an identity-aware proxy (see docs/DEPLOYMENT.md). |
 | `BRANDGUARD_LOG_JSON=1` | One JSON log line per request (never any content). `GET /healthz` is the health check. |
 
 Deployment, backup/restore, migrations and the production checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
@@ -67,7 +69,7 @@ static/       index.html (markup)  style.css  app.js   - plain HTML/CSS/JS, no b
 seed/         synthetic Brewline Coffee guidelines, facts, glossary, assets, settings, demo email
 scripts/      check_live_ai.py - end-to-end test of the real AI judge (needs a key and network)
 docs/         deployment, privacy and security notes
-tests/        ~155 tests: engine, workflow, accounts, access control, migrations, AI privacy, multi-process, UI, browser (e2e/)
+tests/        ~170 tests: engine, workflow, accounts, access control, migrations, AI privacy, multi-process, UI, browser (e2e/)
 ```
 
 ## Architecture and main decisions
@@ -100,8 +102,8 @@ Writing these tests found and fixed several real bugs (an HTML page whose script
 
 - Single organisation: workspaces are not yet isolated per organisation.
 - SQLite with one writer: fine for a team, not for heavy concurrent use (writes are guarded so conflicts are refused rather than corrupting versions). Rate limits are per process.
-- The AI call runs inside the review request with a deadline (default 20 s); a queued background worker is not built. Rule findings never wait for it.
-- No SSO or multi-factor sign-in; the database is not encrypted by the app (use an encrypted disk). Text is not redacted before it goes to the AI (users can opt out per review).
+- The AI tone check runs in an in-process background thread (20 s deadline); rule findings never wait for it. Submit waits until it finishes. There is no external job queue.
+- Two-step sign-in (TOTP) and proxy-based SSO exist but are optional; nothing forces them. The database is not encrypted by the app (use an encrypted disk; `scripts/backup.py` encrypts backups). Masking before the AI covers emails, links, amounts, phone numbers and handles, not names or plain-worded secrets.
 - Timestamps are stored in UTC and shown in the viewer's local time.
 - Sentence and claim detection are rule-based and English-only; unusual phrasing can be missed.
 - Rule-based fixes are minimal word swaps; stronger, intent-preserving rewrites are a Round 3 improvement.
@@ -110,16 +112,15 @@ Writing these tests found and fixed several real bugs (an HTML page whose script
 - A dismissal carries to a later version only for the same wording in the same sentence.
 - Glossary matching is for Latin script, including Hinglish. Devanagari terms are not matched reliably yet.
 - Claim extraction covers prices (₹/Rs/INR), dates, rankings, common superlatives and keyword facts, not every possible claim.
-- Image checks use metadata (name, alt text, colours entered by the user), not pixels; vision-based reading is not built yet.
+- Uploaded images are read for size and an estimated background/text colour (Pillow); alt text is typed by the author and no vision model recognises what the picture shows.
 - Not a substitute for legal advice.
 
 ## Next steps
 
 1. Run `scripts/check_live_ai.py` with a real `ANTHROPIC_API_KEY`: the live call is the one path the tests cannot cover.
-2. SSO and multi-factor sign-in on top of the built-in accounts.
-3. Read uploaded images with a vision model, so alt text and contrast come from the image itself.
-4. Intent-preserving rewrites with a diff view, and privacy mode with leakage tests (redact secrets before AI calls).
-5. Per-organisation workspaces and PostgreSQL.
+2. A vision model to describe images and draft alt text; a setting that forces two-step sign-in.
+3. Intent-preserving rewrites with a diff view; masking of names and codenames before AI calls.
+4. Per-organisation workspaces and PostgreSQL.
 
 ## AI disclosure
 

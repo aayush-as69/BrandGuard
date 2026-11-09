@@ -131,3 +131,29 @@ def test_live_provider_returns_parseable_findings():
     text = llm.default_call(llm.SYSTEM, "BRAND RULES\nG-01: Keep a warm, friendly tone.\n\n<content>\nBuy now or lose out, loser.\n</content>",
                             os.environ.get("BRANDGUARD_MODEL", llm.DEFAULT_MODEL))
     assert isinstance(llm._parse(text), list)
+
+
+def test_redaction_masks_details_and_maps_back():
+    from brandguard import llm
+    text = "Mail ira@brewline.in or call +91 98765 43210, only ₹499 at https://brewline.in/x, follow @brewline!"
+    masked, mapping = llm.redact(text)
+    for secret in ("ira@brewline.in", "98765", "₹499", "https://brewline.in/x", "@brewline"):
+        assert secret not in masked
+    assert llm.unredact(masked, mapping) == text
+
+
+def test_judge_sends_masked_text_but_findings_quote_the_original(ai_app):
+    body = "Hurry! Call +91 98765 43210 now, a cheap cup is only ₹499, mail ira@brewline.in today."
+    n = Session(ai_app, NEHA)
+    n.post("/api/content", title="t", body=body, images=[])
+    assert ai_app.calls, "the AI judge should have been called"
+    sent = ai_app.calls[0]
+    for secret in ("98765", "₹499", "ira@brewline.in"):
+        assert secret not in sent
+    assert "[[PHONE_1]]" in sent and "[[AMOUNT_1]]" in sent
+
+
+def test_redaction_can_be_switched_off(ai_app, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_AI_REDACT", "off")
+    Session(ai_app, NEHA).post("/api/content", title="t", body="Write to ira@brewline.in, a cheap cup.", images=[])
+    assert "ira@brewline.in" in ai_app.calls[0]

@@ -197,10 +197,16 @@ def _m4_accounts(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX idx_users_email ON users(lower(email)) WHERE email IS NOT NULL")
 
 
+def _m5_mfa(conn: sqlite3.Connection) -> None:
+    for col in ("totp_secret TEXT", "totp_pending TEXT", "totp_last INTEGER NOT NULL DEFAULT 0"):
+        conn.execute(f"ALTER TABLE users ADD COLUMN {col}")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
     (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
+    (5, "two-step sign-in (TOTP) columns", _m5_mfa),
 ]
 
 

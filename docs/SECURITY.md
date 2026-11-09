@@ -4,6 +4,9 @@
 Sessions are signed, HttpOnly, SameSite=Lax cookies (Secure in production) valid for 8 hours and tied to a per-user epoch,
 so deactivating a user, changing their role or password ends their sessions immediately. The last active admin cannot be removed.
 
+**Two-step sign-in.** Optional TOTP (RFC 6238, any authenticator app), checked on every password sign-in once enabled. A used code cannot be reused,
+wrong codes count toward the same throttle, an admin can reset a lost device. **Single sign-on** works through an identity-aware proxy (see DEPLOYMENT.md).
+
 **Roles.** creator (writes), manager and reviewer (approve something they did not write), admin (knowledge base and users).
 Agency users are *external*: they see only their own content and only public guidance.
 
@@ -16,8 +19,9 @@ no inline script (`script-src 'self'`), no framing, no plugins. All server text 
 **AI.** Output is verified: a finding must quote a real rule and real text from the content or it is dropped. AI findings are labelled,
 capped at medium confidence, never auto-applied. See PRIVACY.md.
 
-**Image analysis uses metadata, not pixels.** BrandGuard checks the alt text, declared colours and declared dimensions that come with
-an image. It does not look at the image itself, so it cannot tell that a picture shows the wrong logo. Vision analysis is future work.
+**Images.** An uploaded image is read on the server (Pillow): its size, and an *estimated* background and text colour from the pixels, which feed
+the contrast check. The estimate is the most common colour and the one that contrasts most with it, so the author should confirm it. Alt text is
+still typed by the author, and BrandGuard does not recognise what a picture shows (wrong logo, wrong product); a vision model for that is future work.
 
-**Out of scope today:** SSO, multi-factor sign-in, encryption at rest, per-tenant isolation (one database serves one brand/organisation),
-a queued asynchronous AI worker. Report problems privately to the maintainer before opening a public issue.
+**Out of scope today:** forced multi-factor sign-in, encryption at rest by the app (use an encrypted volume), per-tenant isolation (one database serves one
+brand/organisation), an external job queue for AI checks (the in-process one is described in DEPLOYMENT.md). Report problems privately to the maintainer before opening a public issue.
