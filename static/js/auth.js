@@ -34,7 +34,7 @@ function afterLogin(){
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===TAB));
   accountUI();return render()}
 let AUTH='demo',AICFG={enabled:false};
-const aiBox=id=>AICFG.enabled?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="${id}" checked> Use AI to judge tone <span class="muted">(sends this text to ${esc(AICFG.provider||'the AI provider')})</span></label><p class="small muted">${esc(AICFG.notice||'')}</p>`:'';
+const aiBox=id=>AICFG.enabled?`<label class="u-blk-m8 small"><input type="checkbox" id="${id}" checked> Use AI to judge tone <span class="muted">(sends this text to ${esc(AICFG.provider||'the AI provider')})</span></label><p class="small muted">${esc(AICFG.notice||'')}</p>`:'';
 const useAI=id=>{const b=document.getElementById(id);return b?b.checked:true};
 function accountUI(){
   const real=AUTH==='accounts';

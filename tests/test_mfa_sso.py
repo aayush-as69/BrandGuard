@@ -88,3 +88,23 @@ def test_sso_off_by_default_and_needs_a_long_secret(acct, tmp_path, monkeypatch)
     monkeypatch.setenv("BRANDGUARD_SSO_SECRET", "short")
     with pytest.raises(RuntimeError, match="SSO_SECRET"):
         create_app(str(tmp_path / "z.db"))
+
+
+def test_two_step_secret_is_encrypted_at_rest_and_wrong_key_cannot_use_it(acct, tmp_path, monkeypatch):
+    import sqlite3
+    secret = _enrol(acct)
+    stored = sqlite3.connect(acct.config["DB_PATH"]).execute("SELECT totp_secret FROM users WHERE email='boss@example.com'").fetchone()[0]
+    assert stored.startswith("enc1:") and secret not in stored
+    # same database, different encryption key: the stored secret is unreadable, so a code can never pass
+    monkeypatch.setenv("BRANDGUARD_DATA_KEY", "a-different-key")
+    c = create_app(acct.config["DB_PATH"]).test_client()
+    r = c.post("/api/login", json={"email": "boss@example.com", "password": PW, "code": totp.at(secret, time.time() + 30)})
+    assert r.status_code == 401
+
+
+def test_legacy_plain_secret_still_works_and_is_resealed_on_next_enrol(acct):
+    import sqlite3
+    from brandguard import vault
+    plain = totp.new_secret()
+    assert vault.unseal(plain, "k") == plain and vault.unseal(vault.seal(plain, "k"), "k") == plain
+    assert vault.unseal(vault.seal(plain, "k"), "other") is None

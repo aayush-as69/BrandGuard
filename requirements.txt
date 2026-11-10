@@ -5,3 +5,4 @@ pypdf>=4.0
 requests>=2.31
 gunicorn>=22.0
 Pillow>=10.3
+cryptography>=42

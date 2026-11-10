@@ -42,6 +42,7 @@ def page(server):
         pg = browser.new_page()
         pg.errors = []
         pg.on("pageerror", lambda e: pg.errors.append(str(e)))
+        pg.on("console", lambda m: pg.errors.append(m.text) if m.type == "error" and "401" not in m.text and "403" not in m.text else None)
         pg.on("dialog", lambda d: d.accept())
         pg.goto(server)
         yield pg
