@@ -447,9 +447,15 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         start_session(row, demo=True)
         return jsonify({k: row[k] for k in ("id", "name", "role", "is_external", "email")})
 
+    def refuse_for_shared_demo_account(user) -> None:
+        """The demo accounts share a public password; nobody should lock the others out by changing it or adding MFA."""
+        if os.environ.get("BRANDGUARD_SEED_DEMO") == "1" and str(user.get("email") or "").endswith("@brewline.demo"):
+            raise Forbidden("The shared demo accounts cannot change their password or use two-step sign-in.")
+
     @app.post("/api/password")
     def change_password():
         user, data = me(), payload()
+        refuse_for_shared_demo_account(user)
         c = conn()
         row = c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
         if not row["password_hash"] or not check_password_hash(row["password_hash"], str(data.get("current") or "")):
@@ -493,6 +499,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/mfa/setup")
     def mfa_setup():
         user = me()
+        refuse_for_shared_demo_account(user)
         secret = totp.new_secret()
         conn().execute("UPDATE users SET totp_pending=? WHERE id=?", (seal(secret), user["id"]))
         conn().commit()
@@ -501,6 +508,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/mfa/enable")
     def mfa_enable():
         user, data, c = me(), payload(), conn()
+        refuse_for_shared_demo_account(user)
         row = c.execute("SELECT totp_pending FROM users WHERE id=?", (user["id"],)).fetchone()
         pending = unseal(row["totp_pending"])
         step = totp.verify(pending, str(data.get("code") or "")) if pending else None

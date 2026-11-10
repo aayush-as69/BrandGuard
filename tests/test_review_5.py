@@ -115,3 +115,20 @@ def test_demo_role_switch_only_between_demo_accounts(tmp_path, monkeypatch):
     assert c.post("/api/demo/switch-role", json={"role": "creator"}).get_json()["name"] == "Rahul"
     assert c.post("/api/demo/switch-role", json={"role": "agency"}).get_json()["name"] == "Neha"
     assert c.post("/api/demo/switch-role", json={"role": "admin"}).status_code == 400          # no hopping to admin
+
+
+def test_shared_demo_accounts_cannot_change_password_or_add_mfa(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "boss@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "correct-horse-battery")
+    monkeypatch.setenv("BRANDGUARD_SEED_DEMO", "1")
+    monkeypatch.setenv("BRANDGUARD_DEMO_PASSWORD", "brandguard")
+    from brandguard.app import create_app
+    app = create_app(str(tmp_path / "p.db"))
+    c = app.test_client()
+    c.post("/api/login", json={"email": "arjun@brewline.demo", "password": "brandguard"})
+    assert c.post("/api/password", json={"current": "brandguard", "new": "something-else-long"}).status_code == 403
+    assert c.post("/api/mfa/setup", json={}).status_code == 403
+    boss = app.test_client()
+    boss.post("/api/login", json={"email": "boss@example.com", "password": "correct-horse-battery"})
+    assert boss.post("/api/mfa/setup", json={}).status_code == 200      # the real admin is unaffected
