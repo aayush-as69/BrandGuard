@@ -24,7 +24,7 @@ Demo credentials are synthetic and intended only for isolated demo deployments. 
 - **Per-review choice:** every author sees a notice and a checkbox ("Use AI to judge tone"). Unticked means nothing leaves the server.
   Re-runs reuse earlier AI findings rather than sending the text again when the text is unchanged.
 - **Disclosure:** the notice text comes from `/api/config` and states the provider, what is sent and how long records are kept.
-- **Provider terms:** your API agreement with Anthropic governs how they handle requests. Check it against your client contracts.
+- **Provider terms:** your agreement with the AI provider you configured (Anthropic, or the OpenAI-compatible service such as BharatCode) governs how they handle requests. Check it against your client contracts. The notice shown to authors names the provider that really receives the text.
 
 ## The AI request log
 By default the log keeps **metadata only**: when, which model, a SHA-256 of the text, its length, which rule codes were sent, the outcome.

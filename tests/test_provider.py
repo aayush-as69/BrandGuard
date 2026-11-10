@@ -81,3 +81,10 @@ def test_openai_provider_turns_reasoning_off_and_refuses_cut_off_output(monkeypa
     with pytest.raises(ValueError, match="rq-9"):
         llm.default_call("S", "U", "qwen-3.8-27b")
     assert sent["reasoning_effort"] == "none" and sent["max_tokens"] == 4000
+
+
+def test_the_notice_names_the_provider_that_really_receives_the_text(monkeypatch):
+    monkeypatch.delenv("BRANDGUARD_LLM_BASE_URL", raising=False)
+    assert llm.provider_name() == "Anthropic"
+    monkeypatch.setenv("BRANDGUARD_LLM_BASE_URL", "https://bharatcode.ai/api/model/v1")
+    assert llm.provider_name() == "bharatcode.ai"
