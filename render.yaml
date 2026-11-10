@@ -11,6 +11,8 @@ services:
       - { key: BRANDGUARD_AUTH, value: accounts }
       - { key: BRANDGUARD_TRUSTED_PROXIES, value: "1" }
       - { key: BRANDGUARD_SECRET, generateValue: true }
+      - { key: BRANDGUARD_SEED_DEMO, value: "1" }           # fill an empty workspace with the Brewline demo (it resets on every restart)
+      - { key: BRANDGUARD_DEMO_PASSWORD, sync: false }     # shared password for neha/arjun/meera/rahul@brewline.demo
       - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
       - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
       # AI judge through BharatCode (OpenAI-compatible). Paste your key from https://bharatcode.ai/account in the dashboard.

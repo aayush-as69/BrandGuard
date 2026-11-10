@@ -99,6 +99,35 @@ def _bootstrap_admin(c: sqlite3.Connection, required: bool) -> None:
                            "admin. Use another email, or fix that account.") from None
 
 
+DEMO_ACCOUNTS = [  # (name, role, external): the same cast as demo mode, signed in with real accounts
+    ("Neha", "creator", 1), ("Arjun", "manager", 0), ("Meera", "reviewer", 0), ("Rahul", "creator", 0)]
+
+
+def _seed_demo_workspace(conn: sqlite3.Connection, db_file: str) -> None:
+    """BRANDGUARD_SEED_DEMO=1: on an empty workspace, load the synthetic Brewline knowledge base, and, if
+    BRANDGUARD_DEMO_PASSWORD is set (10+ characters), add the demo accounts and one sample draft. Safe to run
+    from several workers at once (file lock) and on every start (only fills what is empty). For demo sites only."""
+    import fcntl
+    with open(db_file + ".seed.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not conn.execute("SELECT 1 FROM guidelines LIMIT 1").fetchone():
+            kbm.seed_demo(conn, ROOT / "seed")
+        password = os.environ.get("BRANDGUARD_DEMO_PASSWORD", "")
+        if password:
+            _check_password_strength(password)
+            pw_hash = generate_password_hash(password)
+            for name, role, ext in DEMO_ACCOUNTS:
+                email = f"{name.lower()}@brewline.demo"
+                if not conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+                    conn.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
+                                 (name, role, ext, email, pw_hash))
+            conn.commit()
+            rahul = conn.execute("SELECT * FROM users WHERE email='rahul@brewline.demo'").fetchone()
+            if rahul and not conn.execute("SELECT 1 FROM content LIMIT 1").fetchone():
+                sample = json.loads((ROOT / "seed" / "demo_email.json").read_text(encoding="utf-8"))
+                wf.create_content(conn, dict(rahul), sample["title"], sample["body"], sample.get("images", []), None, "fresh")
+
+
 def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     """llm_call(system, user, model) -> str lets tests (or a private model) replace the AI backend."""
     app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
@@ -138,6 +167,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         dbm.init(boot, demo_users=not accounts)
         if accounts:
             _bootstrap_admin(boot, production)
+            if os.environ.get("BRANDGUARD_SEED_DEMO") == "1":
+                _seed_demo_workspace(boot, app.config["DB_PATH"])
         wf.settle_interrupted_reviews(boot)
         llm.purge_log(boot)  # honour the retention period at every start
     finally:

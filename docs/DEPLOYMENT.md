@@ -112,3 +112,11 @@ Test a restore before you need one. The backup contains content, comments and th
 - The sign-in throttle is shared by all workers on one machine (it lives in the database) and fails closed if the store is unreadable. Across several machines, move it and the database to shared services together.
 - One SQLite file means one machine. Postgres is the upgrade path; the SQL is plain and the migration list is the contract.
 - Two-step sign-in (authenticator app) is optional per user; there is no setting that forces it yet. Authenticator secrets are encrypted in the database with `BRANDGUARD_DATA_KEY` (or, if unset, a key derived from `BRANDGUARD_SECRET`); keep that key apart from the backups, and if you change it people re-enrol.
+
+## Demo seed data (demo sites only)
+
+Set `BRANDGUARD_SEED_DEMO=1` to load the synthetic Brewline knowledge base into an empty workspace on start. Add
+`BRANDGUARD_DEMO_PASSWORD` (10+ characters) to also create four accounts that share it (`neha@`, `arjun@`, `meera@`,
+`rahul@brewline.demo`: agency writer, manager, reviewer, in-house writer) and one sample draft. It only fills what is
+empty, so it is safe on every start; on the free Render tier it re-creates the demo after each restart. Do not use a shared
+password on a site that holds real content.
