@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 BRANDGUARD_ENV=production BRANDGUARD_DB=/data/brandguard.db BRANDGUARD_LOG_JSON=1
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 BRANDGUARD_ENV=production BRANDGUARD_DB=/data/brandguard.db BRANDGUARD_LOG_JSON=1 BRANDGUARD_TRUSTED_PROXIES=1
 WORKDIR /app
 COPY requirements.txt constraints.txt ./
 RUN pip install -r requirements.txt -c constraints.txt

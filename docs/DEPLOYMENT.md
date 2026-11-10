@@ -42,6 +42,8 @@ query strings are never logged.
 
 ## Verifying HTTPS and origin behaviour through the proxy
 
+Set `BRANDGUARD_TRUSTED_PROXIES` to the number of reverse proxies in front of the app (1 for Render, Fly, a single nginx). Without it the app sees the proxy's address for every visitor, so ten failed sign-ins by anyone would lock everyone out; with it set but no proxy in front, a client could forge `X-Forwarded-For`, so never set it when the app is reachable directly. Origin checks compare hosts, not schemes, so an https page talking to an app that sees http still works.
+
 The app trusts the `Host` it receives to decide which `Origin` may write. After deploying, the smoke test must pass **through the public
 URL**. If the proxy rewrites `Host`, writes fail with "Cross-site request refused": either forward the original Host or list the public
 origin in `BRANDGUARD_ALLOWED_ORIGINS`. Confirm by hand once: `curl -i https://your-host/healthz` shows `Strict-Transport-Security`, and

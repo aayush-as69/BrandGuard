@@ -9,6 +9,7 @@ import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
@@ -105,6 +106,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "BRANDGUARD_AUTH=demo in production needs BRANDGUARD_PASSCODE. Without it anyone could sign in as admin. "
             "Use BRANDGUARD_AUTH=accounts for a real deployment.")
     accounts = auth_mode == "accounts"
+    proxies = int(os.environ.get("BRANDGUARD_TRUSTED_PROXIES", "0") or 0)
     sso_header = os.environ.get("BRANDGUARD_SSO_EMAIL_HEADER", "")
     sso_secret = os.environ.get("BRANDGUARD_SSO_SECRET", "") if accounts and sso_header else ""
     if sso_header and accounts and len(sso_secret) < 16:
@@ -169,6 +171,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     # (An injected test backend stays synchronous unless BRANDGUARD_AI_ASYNC=1.)
     ai_async = (os.environ.get("BRANDGUARD_AI_ASYNC") == "1"
                 or (llm_call is None and os.environ.get("BRANDGUARD_AI_ASYNC", "1") != "0"))
+    if proxies:  # behind N reverse proxies: use their X-Forwarded-For/Proto/Host so client IPs and https are right
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies, x_host=proxies)
+    elif production:
+        app.logger.warning("BRANDGUARD_TRUSTED_PROXIES is not set: behind a proxy every visitor shares one address, "
+                           "so the sign-in throttle would count them together. Set it to the number of proxies in front.")
     app.ai_futures = []
     if ai_async:
         pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-review")
@@ -182,7 +190,11 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             finally:
                 c.close()
 
-        judge_factory.schedule = lambda cid, ver: app.ai_futures.append(pool.submit(run_ai_job, cid, ver))
+        def schedule(cid: int, ver: int) -> None:
+            app.ai_futures[:] = [f for f in app.ai_futures if not f.done()]  # keep only unfinished jobs (no slow leak)
+            app.ai_futures.append(pool.submit(run_ai_job, cid, ver))
+
+        judge_factory.schedule = schedule
 
     @app.before_request
     def guard_origin():
@@ -192,14 +204,15 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             if request.headers.get("Sec-Fetch-Site") == "cross-site":
                 return jsonify(error="Cross-site request refused"), 403
             origin = request.headers.get("Origin")
-            if origin and origin != "null":
-                allowed = {request.host_url.rstrip("/")}
-                allowed.update(o.strip().rstrip("/") for o in
-                               os.environ.get("BRANDGUARD_ALLOWED_ORIGINS", "").split(",") if o.strip())
-                if origin.rstrip("/") not in allowed:
-                    return jsonify(error="Cross-site request refused"), 403
-            elif origin == "null":
+            if origin == "null":
                 return jsonify(error="Cross-site request refused"), 403
+            if origin:
+                # Compare the host, not the scheme: behind a TLS-terminating proxy the app sees http while the browser sent https.
+                allowed_hosts = {request.host.lower()}
+                allowed_hosts.update(urlsplit(o.strip()).netloc.lower() for o in
+                                     os.environ.get("BRANDGUARD_ALLOWED_ORIGINS", "").split(",") if o.strip())
+                if urlsplit(origin).netloc.lower() not in allowed_hosts:
+                    return jsonify(error="Cross-site request refused"), 403
         return None
 
     @app.get("/healthz")
@@ -465,6 +478,9 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         row = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not row:
             raise NotFound("No such user")
+        for flag in ("active", "is_external", "reset_mfa"):
+            if flag in data and not isinstance(data[flag], bool):
+                raise ValueError(f"{flag} must be true or false")
         role = data.get("role", row["role"])
         active = 1 if data.get("active", bool(row["active"])) else 0
         external = 1 if data.get("is_external", bool(row["is_external"])) else 0
