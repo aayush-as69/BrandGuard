@@ -19,8 +19,8 @@ When demo seeding is intentionally enabled:
 1. Open the public landing page and confirm **Try demo** is visible.
 2. Select it and confirm the `/login` form contains the configured demo email and password.
 3. Sign in once.
-4. Switch between the seeded roles from the top-bar role selector.
-5. Confirm each switch changes the active role without another email/password prompt.
+4. Open the account menu (your name in the header) and switch between the seeded roles with **Switch demo role**.
+5. Confirm each switch changes the active role without another email/password prompt, and that **Change password** and **Two-step sign-in** are not offered to the shared demo accounts.
 6. Confirm the normal **Sign in** path remains available separately and does not prefill demo credentials unless the user explicitly selects the demo shortcut.
 
 ## Deployment smoke test (after every deploy)
@@ -48,7 +48,7 @@ Unplug the mouse. Automated checks (`tests/e2e/test_keyboard.py`) cover names on
 By hand, also confirm:
 - [ ] Tab order follows the visual order on every screen; focus is always visible.
 - [ ] After "Review now", "Save as new version", Approve and sign-out, focus lands somewhere sensible (not lost at the top of a long page).
-- [ ] Dialogs (`prompt` / `confirm`) can be answered and cancelled with the keyboard.
+- [ ] The account menu opens with Enter/Space, closes with Esc, and the in-page dialogs (Change password, Two-step sign-in) can be filled, submitted and cancelled with the keyboard. Esc closes a dialog.
 - [ ] With a screen reader (NVDA or VoiceOver): toasts are announced (role status / alert), findings read as issue, source, severity, and the tour panel reads as a dialog.
 - [ ] Colour is never the only signal: severity and status always have a text label.
 
