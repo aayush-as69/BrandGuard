@@ -41,6 +41,7 @@ const useAI=id=>{const b=document.getElementById(id);return b?b.checked:true};
 function accountUI(){
   const real=AUTH==='accounts';
   $('#who').classList.toggle('hidden',real);document.querySelector('label[for=who]').classList.toggle('hidden',real);
+  $('#pass').classList.toggle('hidden',real || !!ME);
   $('#hdr-signin').classList.toggle('hidden',!(real&&!ME));$('#acct').classList.toggle('hidden',!(real&&ME));
   if(real&&ME)$('#acct-name').textContent=ME.name+' · '+ME.role+(ME.is_external?' (agency)':'');
   document.querySelector('#nav [data-tab=users]').classList.toggle('hidden',!(real&&ME&&ME.role==='admin'));
