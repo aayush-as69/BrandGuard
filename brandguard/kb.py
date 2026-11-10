@@ -65,6 +65,22 @@ def _check_docx_container(data: bytes) -> None:
             raise ValueError("That .docx expands to an unreasonable size and was not opened")
 
 
+def _drop_running_lines(pages: list[str]) -> list[str]:
+    """Remove page headers, footers and bare page numbers, which repeat on most pages and would
+    otherwise be glued into rules. Only done for documents of three or more pages."""
+    import re
+    if len(pages) < 3:
+        return pages
+    counts: dict[str, int] = {}
+    for pg in pages:
+        for line in {ln.strip() for ln in pg.splitlines() if ln.strip()}:
+            counts[line] = counts.get(line, 0) + 1
+    common = {ln for ln, n in counts.items() if n >= max(3, len(pages) * 0.6) and len(ln) < 120}
+    number = re.compile(r"^(page\s+)?\d{1,4}(\s*(/|of)\s*\d{1,4})?$", re.I)
+    return ["\n".join(ln for ln in pg.splitlines() if ln.strip() not in common and not number.match(ln.strip()))
+            for pg in pages]
+
+
 def extract_text(filename: str, data: bytes) -> str:
     """Return plain text from a .txt/.md, .docx or .pdf upload, within fixed limits on size, pages and text."""
     name = filename.lower()
@@ -80,11 +96,39 @@ def extract_text(filename: str, data: bytes) -> str:
             _check_docx_container(data)
             document = docx.Document(io.BytesIO(data))
             parts, size = [], 0
-            for p in document.paragraphs:
-                size += len(p.text) + 1
+
+            def add(line: str) -> None:
+                nonlocal size
+                size += len(line) + 1
                 if size > MAX_EXTRACT_CHARS:
                     raise _too_long()
-                parts.append(p.text)
+                parts.append(line)
+
+            # Body in document order; table rows become one line each ("cell | cell"), since guideline
+            # tables often hold the rules themselves. Nested tables are read too.
+            def walk(container) -> None:
+                from docx.table import Table
+                from docx.text.paragraph import Paragraph
+                for child in container.element.body.iterchildren() if hasattr(container.element, "body") \
+                        else container._element.iterchildren():
+                    tag = child.tag.rsplit("}", 1)[-1]
+                    if tag == "p":
+                        add(Paragraph(child, container).text)
+                    elif tag == "tbl":
+                        table = Table(child, container)
+                        for row in table.rows:
+                            cells, seen = [], set()
+                            for cell in row.cells:
+                                if id(cell._tc) in seen:   # merged cells repeat
+                                    continue
+                                seen.add(id(cell._tc))
+                                t = " ".join(cell.text.split())
+                                if t:
+                                    cells.append(t)
+                            if cells:
+                                add(" | ".join(cells))
+
+            walk(document)
             return "\n".join(parts)
         if name.endswith(".pdf"):
             from pypdf import PdfReader
@@ -101,7 +145,7 @@ def extract_text(filename: str, data: bytes) -> str:
                 if size > MAX_EXTRACT_CHARS:
                     raise _too_long()
                 parts.append(chunk)
-            text = "\n".join(parts)
+            text = "\n".join(_drop_running_lines(parts))
             if not text.strip():
                 raise ValueError("That PDF has no selectable text (it may be a scan). Paste the text instead.")
             return text
