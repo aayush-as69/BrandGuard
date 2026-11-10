@@ -538,7 +538,9 @@ def submit(conn, user: dict, content_id: int) -> None:
     hidden = current(conn, c)["review_meta"].get("truncated", 0)
     if hidden:
         raise ValueError(f"{hidden} more findings are not shown yet. Fix the ones you can see and run the review again before submitting.")
-    conn.execute("UPDATE content SET status='in_review' WHERE id=?", (c["id"],))
+    if not conn.execute("UPDATE content SET status='in_review' WHERE id=? AND status=? AND current_version=?",
+                        (c["id"], c["status"], c["current_version"])).rowcount:
+        raise ValueError("Someone else changed this content a moment ago. Reload and try again.")
     audit(conn, c["id"], user["id"], "submitted", f"v{c['current_version']} with {len(open_findings(conn, c))} open findings")
     conn.commit()
 
@@ -559,7 +561,11 @@ def approve(conn, user: dict, content_id: int) -> None:
         for r in cur)
     if needs_reviewer and user["role"] != "reviewer":
         raise Forbidden("A reviewer must approve because a claim or low-confidence finding was dismissed")
-    conn.execute("UPDATE content SET status='approved' WHERE id=?", (c["id"],))
+    if conn.execute("SELECT 1 FROM versions WHERE content_id=? AND created_by=? AND version>1", (c["id"], user["id"])).fetchone():
+        raise Forbidden("You edited this content, so someone else must approve it")
+    if not conn.execute("UPDATE content SET status='approved' WHERE id=? AND status='in_review' AND current_version=?",
+                        (c["id"], c["current_version"])).rowcount:
+        raise ValueError("Someone else changed this content a moment ago. Reload and try again.")
     audit(conn, c["id"], user["id"], "approved", f"v{c['current_version']}")
     conn.commit()
 
@@ -571,7 +577,9 @@ def request_changes(conn, user: dict, content_id: int, note: str) -> None:
     note = _text(note, "Note", MAX_FIELD)
     if not note.strip():
         raise ValueError("Say what needs to change")
-    conn.execute("UPDATE content SET status='changes_requested' WHERE id=?", (c["id"],))
+    if not conn.execute("UPDATE content SET status='changes_requested' WHERE id=? AND status='in_review'",
+                        (c["id"],)).rowcount:
+        raise ValueError("Someone else changed this content a moment ago. Reload and try again.")
     conn.execute("INSERT INTO comments(content_id, finding_id, user_id, body, created_at) VALUES (?,?,?,?,?)",
                  (c["id"], None, user["id"], f"Changes requested: {note.strip()}", now()))
     audit(conn, c["id"], user["id"], "changes_requested", note.strip()[:120])
