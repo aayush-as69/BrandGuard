@@ -370,11 +370,13 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                 if ai_on else ""},
         )
 
-    def start_session(row) -> None:
+    def start_session(row, demo: bool = False) -> None:
         session.clear()
         session.permanent = True
         session["uid"] = row["id"]
         session["epoch"] = row["session_epoch"]
+        if demo:
+            session["demo"] = True
 
     @app.post("/api/login")
     def login():
@@ -412,7 +414,23 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                 if not hmac.compare_digest(given.encode(), expected.encode()):
                     throttle.record(c, who)
                     raise Forbidden("Wrong passcode")
-        start_session(row)
+        start_session(row, demo=not accounts)
+        return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})
+
+    @app.post("/api/demo/switch-role")
+    def demo_switch_role():
+        if accounts or not session.get("demo"):
+            raise Forbidden("Demo role switching is only available in the demo workspace")
+        role = str(payload().get("role") or "").strip().lower()
+        demo_ids = {"creator": 5, "manager": 2, "reviewer": 3, "admin": 4}
+        user_id = demo_ids.get(role)
+        if not user_id:
+            raise ValueError("Choose a valid demo role")
+        c = conn()
+        row = c.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not row:
+            raise NotFound("That demo role is unavailable")
+        start_session(row, demo=True)
         return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})
 
     @app.post("/api/password")
