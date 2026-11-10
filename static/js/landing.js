@@ -2,7 +2,7 @@
 function landing(note){
   const demo=AUTH!=='accounts';
   const cta=demo
-    ? '<button class="btn primary" data-c="tourStart">Explore the live demo <span aria-hidden="true">↗</span></button><button class="btn landing-secondary" data-c="focusSignin">Choose a demo role</button>'
+    ? '<button class="btn primary" data-c="tourStart">Take the 2-minute tour <span aria-hidden="true">↗</span></button><button class="btn landing-secondary" data-c="focusSignin">Choose a demo role</button>'
     : '<button class="btn primary" data-c="focusSignin">Sign in to BrandGuard <span aria-hidden="true">↗</span></button>';
   $('#main').innerHTML=`<div class="landing">
     ${note?`<p class="landing-notice" role="status">${esc(note)}</p>`:''}
