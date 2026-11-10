@@ -162,8 +162,8 @@ header h1::before{display:none}
 .hero-p{max-width:510px;margin:0;color:#aaa5bb;font-size:16px;line-height:1.85}
 .hero-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:30px}
 .hero-actions .btn,.closing-action .btn{padding:12px 19px;font-size:13px;letter-spacing:.01em}
-.btn.primary{background:linear-gradient(115deg,#8064d6,#5c4ca4);border:1px solid #ad98f1;color:#fff;box-shadow:0 8px 30px #6047ac35}
-.btn.primary:hover{filter:brightness(1.12);box-shadow:0 10px 36px #7b61d955}
+.landing .btn.primary{background:linear-gradient(115deg,#8064d6,#5c4ca4);border:1px solid #ad98f1;color:#fff;box-shadow:0 8px 30px #6047ac35}
+.landing .btn.primary:hover{filter:brightness(1.12);box-shadow:0 10px 36px #7b61d955}
 .landing-secondary{padding:12px 16px;border-color:#47405e;background:#151321;color:#ded9ee}
 .landing-secondary:hover{border-color:#9c87db}
 .hero-assurance{display:flex;align-items:center;gap:9px;margin-top:24px;color:#d1ccde;font-size:11px}
