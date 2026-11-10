@@ -307,6 +307,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     # -------------------------------------------------------------------- pages
     @app.get("/")
+    @app.get("/login")
     def index():
         return send_from_directory(app.static_folder, "index.html")
 
