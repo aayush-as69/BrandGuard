@@ -97,3 +97,21 @@ def test_demo_workspace_seeding_is_complete_and_repeatable(tmp_path, monkeypatch
     assert conn.execute("SELECT COUNT(*) FROM content").fetchone()[0] == 1
     c = app.test_client()
     assert c.post("/api/login", json={"email": "arjun@brewline.demo", "password": "demo-password-123"}).status_code == 200
+
+
+def test_demo_role_switch_only_between_demo_accounts(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "boss@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "correct-horse-battery")
+    monkeypatch.setenv("BRANDGUARD_SEED_DEMO", "1")
+    monkeypatch.setenv("BRANDGUARD_DEMO_PASSWORD", "brandguard")
+    from brandguard.app import create_app
+    app = create_app(str(tmp_path / "s.db"))
+    admin = app.test_client()
+    admin.post("/api/login", json={"email": "boss@example.com", "password": "correct-horse-battery"})
+    assert admin.post("/api/demo/switch-role", json={"role": "manager"}).status_code == 403   # real admin cannot hop
+    c = app.test_client()
+    c.post("/api/login", json={"email": "arjun@brewline.demo", "password": "brandguard"})
+    assert c.post("/api/demo/switch-role", json={"role": "creator"}).get_json()["name"] == "Rahul"
+    assert c.post("/api/demo/switch-role", json={"role": "agency"}).get_json()["name"] == "Neha"
+    assert c.post("/api/demo/switch-role", json={"role": "admin"}).status_code == 400          # no hopping to admin

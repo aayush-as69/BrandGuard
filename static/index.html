@@ -23,6 +23,10 @@
   <label class="small muted" for="who">Role</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off">
   <select id="who" aria-label="Signed in as"></select>
+  <label class="small muted hidden" id="demo-role-l" for="demo-role">Role</label>
+  <select id="demo-role" class="hidden" aria-label="Switch demo role">
+    <option value="manager">Manager · Arjun</option><option value="reviewer">Reviewer · Meera</option>
+    <option value="creator">Creator · Rahul</option><option value="agency">Agency writer · Neha</option></select>
   <a href="/login" id="hdr-signin" class="btn primary hidden" data-c="goLogin">Sign in</a>
   <span id="acct" class="hidden row"><span class="small muted" id="acct-name"></span>
     <button class="btn" id="mfa" type="button">Two-step sign-in</button>

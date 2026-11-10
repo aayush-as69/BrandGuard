@@ -133,7 +133,7 @@ python run.py
 
 Open **http://127.0.0.1:5000**.
 
-For a local development demo, the app can use its built-in demo identities. For a seeded account-based demo deployment, enable `BRANDGUARD_SEED_DEMO=1` and `BRANDGUARD_DEMO_PASSWORD`; the landing page then exposes **Try demo**, which opens the real sign-in screen with the demo credentials prefilled. After the demo sign-in, use **Switch role** to move between demo roles without signing in again.
+For a local development demo, the app can use its built-in demo identities. For a seeded account-based demo deployment, enable `BRANDGUARD_SEED_DEMO=1` and `BRANDGUARD_DEMO_PASSWORD`; the landing page then exposes **Try demo**, which opens the real sign-in screen with the demo credentials prefilled. After the demo sign-in, use the **Role** selector in the header to move between demo roles without signing in again.
 
 Start the guided tour from the **Tour** button, or load the synthetic Brewline Coffee knowledge base from the Knowledge base tab.
 
@@ -151,7 +151,7 @@ The included demo uses **Brewline Coffee**, a fictional brand. All seeded conten
 
 1. Select **Try demo** on the landing page when demo seeding is enabled.
 2. Sign in once with the prefilled demo credentials.
-3. Use **Switch role** to explore Creator, Manager, Reviewer, and Admin without another email/password login.
+3. Use the **Role** selector in the header to explore Creator, Manager, Reviewer, and Admin without another email/password login.
 4. Open **Knowledge base** and select *Load Brewline demo knowledge base* if the seeded workspace is empty.
 5. Open **New**, load the demo email, and select **Review now**.
 6. Inspect the source-backed findings. Accept or edit a suggestion, or dismiss it with a reason.
