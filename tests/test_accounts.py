@@ -18,6 +18,31 @@ def login(app, email="boss@example.com", password=PW):
     return c, c.post("/api/login", json={"email": email, "password": password})
 
 
+
+def test_demo_role_switch_stays_in_demo_session(app):
+    client = app.test_client()
+    assert client.post("/api/login", json={"user_id": 2}).status_code == 200
+    assert client.get("/api/me").get_json()["role"] == "manager"
+    switched = client.post("/api/demo/switch-role", json={"role": "reviewer"})
+    assert switched.status_code == 200
+    assert switched.get_json()["role"] == "reviewer"
+    assert client.get("/api/me").get_json()["role"] == "reviewer"
+    switched = client.post("/api/demo/switch-role", json={"role": "admin"})
+    assert switched.status_code == 200
+    assert client.get("/api/me").get_json()["role"] == "admin"
+
+
+def test_demo_role_switch_is_not_available_in_accounts_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_ENV", "production")
+    monkeypatch.setenv("BRANDGUARD_SECRET", "s" * 32)
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "strong-admin-password")
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    app = create_app(str(tmp_path / "accounts-switch.db"))
+    client = app.test_client()
+    assert client.post("/api/demo/switch-role", json={"role": "admin"}).status_code in (401, 403)
+
+
 def test_no_demo_users_and_anonymous_cannot_pick_admin(acct):
     c = acct.test_client()
     assert c.post("/api/login", json={"user_id": 1}).status_code == 401  # id login is a demo-mode feature
