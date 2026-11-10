@@ -12,6 +12,17 @@
 Chromium is not installed). `python -m pytest -q -m live` runs the live-provider tests; they need `ANTHROPIC_API_KEY`, use synthetic
 Brewline text only, and also run from GitHub Actions (**Live AI check**, manual). The full path they cover is in `tests/test_ai_privacy.py`.
 
+## Demo login and role-switch smoke test
+
+When demo seeding is intentionally enabled:
+
+1. Open the public landing page and confirm **Try demo** is visible.
+2. Select it and confirm the `/login` form contains the configured demo email and password.
+3. Sign in once.
+4. Switch between the seeded roles from the top-bar role selector.
+5. Confirm each switch changes the active role without another email/password prompt.
+6. Confirm the normal **Sign in** path remains available separately and does not prefill demo credentials unless the user explicitly selects the demo shortcut.
+
 ## Deployment smoke test (after every deploy)
 
 ```
