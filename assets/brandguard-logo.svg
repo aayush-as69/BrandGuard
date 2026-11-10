@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+<title id="title">BrandGuard logo</title><desc id="desc">A modern shield with a verified check mark.</desc>
+<defs><linearGradient id="bg" x1="12" y1="12" x2="116" y2="116" gradientUnits="userSpaceOnUse"><stop stop-color="#A78BFA"/><stop offset=".52" stop-color="#6366F1"/><stop offset="1" stop-color="#38BDF8"/></linearGradient><linearGradient id="shine" x1="42" y1="25" x2="95" y2="100" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF"/><stop offset="1" stop-color="#E0E7FF"/></linearGradient></defs>
+<path d="M64 7 111 24v34c0 30-19 49-47 63C36 107 17 88 17 58V24L64 7Z" fill="url(#bg)"/>
+<path d="M64 18 100 31v27c0 23-13 38-36 49C41 96 28 81 28 58V31l36-13Z" fill="#0B1020" opacity=".84"/>
+<path d="m43 64 14 14 29-31" fill="none" stroke="url(#shine)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M64 7 111 24v34c0 30-19 49-47 63" fill="none" stroke="#FFFFFF" stroke-opacity=".35" stroke-width="2"/>
+</svg>

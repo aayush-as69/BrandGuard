@@ -1,4 +1,12 @@
-# Data retention and AI privacy
+<div align="right"><img src="../assets/brandguard-mark.svg" width="34" alt="BrandGuard"></div>
+
+> Understand what BrandGuard stores, what an optional AI provider receives, and how logs, retention, and deletion work.
+
+[Documentation index](README.md) · [Deployment](DEPLOYMENT.md) · [Testing](TESTING.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+
+---
+
+# Privacy and data retention
 
 ## What is stored
 Content text and image metadata, findings, comments, decisions and an audit trail, in the database you control. Accounts store a name,
