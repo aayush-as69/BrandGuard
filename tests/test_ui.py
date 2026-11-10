@@ -105,3 +105,14 @@ def test_no_inline_styles_and_style_src_is_strict(app):
     assert "'unsafe-inline'" not in style_src
     rec = (STATIC / "record.css").read_text(encoding="utf-8")
     assert "@media print" in rec  # the approval record stays printable on paper
+
+
+def test_every_data_c_action_is_registered():
+    """A button whose data-c has no entry in ACTIONS silently does nothing (it happened with 'Try demo')."""
+    import re
+    root = STATIC
+    js = "\n".join(p.read_text(encoding="utf-8") for p in sorted((root / "js").glob("*.js")))
+    used = set(re.findall(r'data-c=["\\\']?([A-Za-z]+)', js + (root / "index.html").read_text(encoding="utf-8")))
+    block = re.search(r"const ACTIONS=\{([^}]*)\}", js).group(1)
+    registered = {n.strip() for n in block.split(",")}
+    assert used - registered == set(), f"data-c actions with no handler: {sorted(used - registered)}"
