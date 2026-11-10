@@ -1,3 +1,11 @@
+<div align="right"><img src="../assets/brandguard-mark.svg" width="34" alt="BrandGuard"></div>
+
+> Use automated checks and focused manual passes to verify review flows, accessibility, deployment health, and backup recovery.
+
+[Documentation index](README.md) · [Deployment](DEPLOYMENT.md) · [Testing](TESTING.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+
+---
+
 # Testing guide
 
 `python -m pytest -q` runs everything automated (about 190 tests, including real-browser tests in `tests/e2e` that skip if

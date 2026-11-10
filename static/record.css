@@ -8,3 +8,7 @@ button{font:inherit;padding:7px 13px;background:#171730;color:#f1f0ff;border:1px
 button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}
 @media print{body{color:#0f172a;background:#fff;color-scheme:light}h2,td,th{border-color:#cbd5e1}.m{color:#475569}
 .banner.ok{background:#f0fdf4;border-color:#166534}.banner.no{background:#fff7ed;border-color:#9a3412}pre{background:#f8fafc;border-color:#cbd5e1}button{display:none}}
+
+.brand{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:17px;font-weight:700;letter-spacing:-.02em}
+.brand img{display:block;width:30px;height:30px}
+@media print{.brand img{print-color-adjust:exact;-webkit-print-color-adjust:exact}}

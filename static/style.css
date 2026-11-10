@@ -144,3 +144,8 @@ input[type=file]::file-selector-button:hover{border-color:#a78bfa}
 .u-mt10{margin-top:10px}.u-py6{padding:6px 0}.u-m8-0-4{margin:8px 0 4px}.u-mt8{margin-top:8px}.u-flex1{flex:1}
 .u-cursor-default{cursor:default}.u-wauto{width:auto}.u-w35{width:35%}
 .swatch{padding:1px 8px;border-radius:4px}
+
+/* Brand identity */
+header h1::before{display:none}
+.brand-logo{display:block;width:28px;height:28px;flex:none;filter:drop-shadow(0 0 9px #8b5cf655)}
+@media(max-width:700px){.brand-logo{width:25px;height:25px}}
