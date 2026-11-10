@@ -45,6 +45,7 @@ def render(d: dict, viewer: str) -> str:
               else f"<b>Not approved.</b> Status: {e(STATUS.get(c['status'], c['status']))}. This is a snapshot, not a clearance.")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Approval record: {e(c['title'])}</title><link rel="stylesheet" href="/static/record.css"></head><body>
+<div class="brand"><img src="/static/brandguard-mark.svg" alt=""><span>BrandGuard</span></div>
 <p class="m">BrandGuard approval record. Synthetic demo data. Generated {e(_when(dt.datetime.now(dt.timezone.utc).isoformat()))} for {e(viewer)}.</p>
 <h1>{e(c['title'])}</h1><p class="m">Author: {e(c['author'])}. Version {c['current_version']}.</p>
 <div class="banner {'ok' if approved else 'no'}">{banner}</div><button id="print">Print or save as PDF</button><script src="/static/print.js"></script>

@@ -1,3 +1,11 @@
+<div align="right"><img src="../assets/brandguard-mark.svg" width="34" alt="BrandGuard"></div>
+
+> A practical overview of identity, access boundaries, request protections, upload handling, and known security limits.
+
+[Documentation index](README.md) · [Deployment](DEPLOYMENT.md) · [Testing](TESTING.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+
+---
+
 # Security model
 
 **Accounts.** Email and password, hashed with scrypt, minimum 10 characters, failed sign-ins throttled per address and per email.
