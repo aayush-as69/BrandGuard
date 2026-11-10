@@ -12,6 +12,10 @@
 Content text and image metadata, findings, comments, decisions and an audit trail, in the database you control. Accounts store a name,
 email, role and a password hash. Nothing is sent anywhere unless the AI judge is switched on.
 
+## The demo login
+
+Demo credentials are synthetic and intended only for isolated demo deployments. When the configured **Try demo** shortcut is used, the browser receives the demo email and password already configured for that deployment. This does not change the normal account-login path. After authentication, demo role switching reuses the authenticated session and does not repeatedly submit the demo password.
+
 ## The AI judge
 - **Off by default** unless an AI provider is configured (`ANTHROPIC_API_KEY`, or `BRANDGUARD_LLM_BASE_URL` with `BRANDGUARD_LLM_API_KEY` and `BRANDGUARD_MODEL`). `BRANDGUARD_LLM=off` forces it off.
 - **What is sent** when it is on: the content text of that review, plus the few guideline rules that match it. Nothing else:
