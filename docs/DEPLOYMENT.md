@@ -19,7 +19,7 @@ Staging should use `BRANDGUARD_AUTH=accounts`, its own database and its own API 
 
 1. Copy `.env.example`, fill it in, keep it out of git.
 2. Build and run: `docker build -t brandguard . && docker run -p 8000:8000 -v bg-data:/data --env-file .env brandguard`
-   (or deploy `render.yaml` as a Render blueprint).
+   (or deploy `render.yaml` as a free-tier Render demo blueprint: no disk, so the database resets on restart; for real use add a persistent disk on a paid instance).
 3. Start once with `BRANDGUARD_ADMIN_EMAIL` and `BRANDGUARD_ADMIN_PASSWORD`. That creates the first admin. Remove both afterwards.
 4. Sign in, open **Users**, add the team and agency accounts. Passwords are hashed (scrypt); deactivating an account or
    resetting its password signs that person out at once. Sessions end after 8 hours.
