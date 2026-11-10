@@ -79,3 +79,21 @@ def test_two_workers_bootstrapping_the_admin_at_once_do_not_crash(tmp_path, monk
     appmod._bootstrap_admin(Stale(dbm.connect(path)), True)   # must not raise
     n = first.execute("SELECT COUNT(*) FROM users WHERE email='boss@example.com'").fetchone()[0]
     assert n == 1
+
+
+def test_demo_workspace_seeding_is_complete_and_repeatable(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "boss@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "correct-horse-battery")
+    monkeypatch.setenv("BRANDGUARD_SEED_DEMO", "1")
+    monkeypatch.setenv("BRANDGUARD_DEMO_PASSWORD", "demo-password-123")
+    from brandguard.app import create_app
+    path = str(tmp_path / "d.db")
+    create_app(path)
+    app = create_app(path)          # a second start must not duplicate anything
+    conn = db.connect(path)
+    assert conn.execute("SELECT COUNT(*) FROM guidelines").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM users WHERE email LIKE '%@brewline.demo'").fetchone()[0] == 4
+    assert conn.execute("SELECT COUNT(*) FROM content").fetchone()[0] == 1
+    c = app.test_client()
+    assert c.post("/api/login", json={"email": "arjun@brewline.demo", "password": "demo-password-123"}).status_code == 200
