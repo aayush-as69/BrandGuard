@@ -13,4 +13,7 @@ services:
       - { key: BRANDGUARD_SECRET, generateValue: true }
       - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
       - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
-      - { key: ANTHROPIC_API_KEY, sync: false }
+      - { key: ANTHROPIC_API_KEY, sync: false }        # leave empty if you use the provider below
+      - { key: BRANDGUARD_LLM_BASE_URL, sync: false }  # e.g. https://api.your-provider.example/v1
+      - { key: BRANDGUARD_LLM_API_KEY, sync: false }
+      - { key: BRANDGUARD_MODEL, sync: false }

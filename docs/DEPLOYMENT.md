@@ -92,7 +92,7 @@ Test a restore before you need one. The backup contains content, comments and th
 - [ ] First admin created, bootstrap variables removed, demo users absent (`/api/users` is not public)
 - [ ] Database on a persistent, encrypted disk (the app does not encrypt it); daily encrypted `scripts/backup.py` copied off the machine; one restore tested
 - [ ] `BRANDGUARD_AI_LOG=metadata` and a retention you have agreed with the brand owner (see PRIVACY.md)
-- [ ] `ANTHROPIC_API_KEY` set only if the brand approves sending text to the provider; users can still opt out per review
+- [ ] An AI provider key (`ANTHROPIC_API_KEY`, or `BRANDGUARD_LLM_*`) set only if the brand approves sending text to the provider; users can still opt out per review
 - [ ] `/healthz` wired to the platform's health check; logs collected
 - [ ] Health check alert configured; smoke test passes through the public URL; one restore drill done (docs/TESTING.md)
 - [ ] `pip-audit` (CI runs it) is clean; dependabot enabled
