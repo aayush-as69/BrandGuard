@@ -329,3 +329,68 @@ header h1::before{display:none}
 .login-go{margin-top:4px;padding:11px 16px;font-size:15px}
 .login-back{color:var(--accent)}
 a.btn{text-decoration:none;display:inline-block}
+
+/* Workspace refinement */
+header{min-height:64px;padding:10px clamp(16px,3vw,34px);gap:14px}
+header h1{font-size:18px}
+header .tag{font-size:12px;letter-spacing:.01em}
+header nav{margin-left:10px}
+header nav button{padding:8px 15px}
+#who{min-width:118px}
+#pass{width:118px!important}
+main{max-width:1440px;padding:30px clamp(16px,3vw,42px) 56px}
+main>.stack{max-width:1320px;margin:0 auto}
+.card{border-radius:16px;padding:22px;background:linear-gradient(145deg,#10101c,#0c0c15) padding-box,var(--g-soft) border-box;box-shadow:0 14px 45px #0004}
+.card h2{font-size:18px;letter-spacing:-.025em}
+.card h3{font-size:15px}
+.card>p.muted{max-width:72ch}
+.grid{grid-template-columns:minmax(255px,300px) minmax(0,1fr);gap:24px}
+.grid>.stack>.card:first-child{position:sticky;top:88px}
+.item{padding:14px 15px;margin-bottom:9px;border-radius:12px}
+.item b{font-size:13.5px}
+.item .chip{margin-top:5px}
+.grid2{grid-template-columns:minmax(0,1.08fr) minmax(320px,.92fr);gap:22px}
+#detail>.stack>.card:first-child{padding:20px 22px}
+#detail .grid2>.card,#detail .grid2 .stack>.card{background:linear-gradient(145deg,#11111e,#0d0d16) padding-box,var(--g-soft) border-box}
+.body{max-width:none;font-size:15.5px;line-height:1.8;padding:20px 22px}
+.finding{padding:15px;border-radius:13px}
+.finding p{max-width:78ch}
+table tr:hover td{background:#17152866}
+td,th{padding:10px 11px}
+.tiles{gap:12px}
+.tile{min-height:92px;padding:15px;border-radius:13px;background:linear-gradient(145deg,#11111e,#0b0b14)}
+.tile b{font-size:26px}
+.meter{height:7px}
+#newuser{display:grid;grid-template-columns:1.1fr 1.35fr .7fr auto 1.2fr auto;gap:10px}
+#newuser label{display:flex;align-items:center;gap:7px;white-space:nowrap}
+#newuser input[type=checkbox]{margin:0}
+@media(max-width:1050px){
+  #newuser{grid-template-columns:1fr 1fr 1fr}
+  #newuser label{grid-column:auto}
+}
+@media(max-width:800px){
+  header{align-items:flex-start}
+  header nav{order:3;width:100%;margin:0;overflow:auto}
+  header nav button{flex:1}
+  #acct{margin-left:auto}
+  .grid,.grid2{grid-template-columns:1fr}
+  .grid>.stack>.card:first-child{position:static}
+  #newuser{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  main{padding:18px 12px 42px}
+  .card{padding:16px}
+  header{padding:9px 12px}
+  header .tag{display:none}
+  #who{min-width:0;max-width:125px}
+  #acct-name{display:none}
+}
+
+/* Demo entry */
+.demo-login{width:min(100%,560px);padding:14px 15px;border:1px solid #3d3554;border-radius:13px;background:linear-gradient(145deg,#12101b,#0d0c14);box-shadow:0 16px 45px #0004}
+.demo-login-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.demo-badge{font-size:9px;font-weight:800;letter-spacing:.14em;color:#c9b8ff}
+.demo-login-row{display:flex;gap:8px}
+.demo-pass{flex:1;min-width:0!important;width:auto!important;padding:11px 12px!important}
+.demo-role-note{margin:9px 0 0;color:#8f899d;font-size:10.5px}
+.demo-role-note b{color:#c8b8f4}
