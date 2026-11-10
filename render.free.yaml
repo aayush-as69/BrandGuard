@@ -1,0 +1,16 @@
+# Free-tier demo blueprint: no persistent disk, so the database is wiped whenever the service restarts or sleeps.
+# Fine for a hackathon demo (sign in, press "Load demo knowledge base"); do not use for real content.
+services:
+  - type: web
+    name: brandguard-demo
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - { key: BRANDGUARD_ENV, value: production }
+      - { key: BRANDGUARD_AUTH, value: accounts }
+      - { key: BRANDGUARD_TRUSTED_PROXIES, value: "1" }
+      - { key: BRANDGUARD_SECRET, generateValue: true }
+      - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
+      - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
+      - { key: ANTHROPIC_API_KEY, sync: false }
