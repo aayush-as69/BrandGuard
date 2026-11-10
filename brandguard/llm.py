@@ -60,6 +60,13 @@ def provider() -> str:
     return "openai" if os.environ.get("BRANDGUARD_LLM_BASE_URL", "").strip() else "anthropic"
 
 
+def openai_max_tokens() -> int:
+    try:
+        return min(32000, max(256, int(os.environ.get("BRANDGUARD_LLM_MAX_TOKENS", 4000))))
+    except ValueError:
+        return 4000
+
+
 def _chat_url() -> str:
     base = os.environ["BRANDGUARD_LLM_BASE_URL"].strip().rstrip("/")
     if not (base.startswith("https://") or base.startswith("http://localhost") or base.startswith("http://127.0.0.1")):
@@ -76,13 +83,19 @@ def default_call(system: str, user: str, model: str) -> str:
     if provider() == "openai":
         url = _chat_url()
         headers = {"authorization": "Bearer " + os.environ["BRANDGUARD_LLM_API_KEY"], "content-type": "application/json"}
-        body = {"model": model, "max_tokens": 1500,
+        # Output limits include reasoning, so the default turns reasoning off for this short JSON task
+        # (BRANDGUARD_LLM_REASONING=none|low|medium|high, or "omit" to send nothing).
+        body = {"model": model, "max_tokens": openai_max_tokens(),
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     else:
         url = API_URL
         headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01",
                    "content-type": "application/json"}
         body = {"model": model, "max_tokens": 1500, "system": system, "messages": [{"role": "user", "content": user}]}
+    if provider() == "openai":
+        effort = os.environ.get("BRANDGUARD_LLM_REASONING", "none").strip().lower()
+        if effort and effort != "omit":
+            body["reasoning_effort"] = effort
     deadline = time.monotonic() + ai_timeout()
     r = None
     for attempt in range(2):  # one retry for rate limits and server hiccups, if the deadline allows
@@ -99,10 +112,16 @@ def default_call(system: str, user: str, model: str) -> str:
                 time.sleep(wait)
                 continue
         break
-    r.raise_for_status()
+    if r.status_code >= 400:
+        rid = r.headers.get("x-request-id")
+        raise RuntimeError(f"AI provider returned HTTP {r.status_code}" + (f" (request-id {rid})" if rid else ""))
     data = r.json()
     if provider() == "openai":
-        return (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
+        choice = (data.get("choices") or [{}])[0]
+        if choice.get("finish_reason") == "length":  # cut short even with HTTP 200: never use half an answer, never retry
+            raise ValueError("AI output was cut off (token limit reached); raise BRANDGUARD_LLM_MAX_TOKENS "
+                             "or keep BRANDGUARD_LLM_REASONING=none. request-id: " + (r.headers.get("x-request-id") or "n/a"))
+        return (choice.get("message") or {}).get("content") or ""
     return "".join(b.get("text", "") for b in data.get("content", []))
 
 

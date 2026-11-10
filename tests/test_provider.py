@@ -64,3 +64,20 @@ def test_plain_http_endpoints_are_refused(monkeypatch):
     monkeypatch.setenv("BRANDGUARD_LLM_BASE_URL", "http://api.example.in/v1")
     with pytest.raises(ValueError):
         llm._chat_url()
+
+
+def test_openai_provider_turns_reasoning_off_and_refuses_cut_off_output(monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_LLM_BASE_URL", "https://bharatcode.ai/api/model/v1")
+    monkeypatch.setenv("BRANDGUARD_LLM_API_KEY", "k")
+    sent = {}
+
+    def post(url, headers, json, timeout):
+        sent.update(json)
+        r = _Resp({"choices": [{"finish_reason": "length", "message": {"content": "[{\"rule"}}]})
+        r.headers = {"x-request-id": "rq-9"}
+        return r
+
+    monkeypatch.setattr("requests.post", post)
+    with pytest.raises(ValueError, match="rq-9"):
+        llm.default_call("S", "U", "qwen-3.8-27b")
+    assert sent["reasoning_effort"] == "none" and sent["max_tokens"] == 4000
