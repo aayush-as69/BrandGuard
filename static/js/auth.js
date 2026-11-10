@@ -4,12 +4,10 @@ async function boot(){
   try{const cfg=cfg2=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
   if(AUTH==='accounts'){
     document.querySelectorAll('.tour-only').forEach(x=>x.classList.add('hidden'));
-    landing();
-    try{ME=await api('/api/me');afterLogin()}
-    catch(e){
-      if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});afterLogin();return}catch(e2){}}
-      accountUI()}
-    return}
+    try{ME=await api('/api/me')}catch(e){ME=null}
+    if(ME){history.replaceState({},'','/');afterLogin();return}
+    if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});history.replaceState({},'','/');afterLogin();return}catch(e2){}}
+    accountUI();showPublic();return}
   USERS=await api('/api/users');
   $('#who').innerHTML='<option value="">Choose…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.name)} · ${u.role}${u.is_external?' (agency)':''}</option>`).join('');
   try{ME=await api('/api/me');$('#who').value=ME.id;afterLogin()}catch(e){landing()}
@@ -39,15 +37,23 @@ const useAI=id=>{const b=document.getElementById(id);return b?b.checked:true};
 function accountUI(){
   const real=AUTH==='accounts';
   $('#who').classList.toggle('hidden',real);document.querySelector('label[for=who]').classList.toggle('hidden',real);
-  $('#signin').classList.toggle('hidden',!(real&&!ME));$('#acct').classList.toggle('hidden',!(real&&ME));
+  $('#hdr-signin').classList.toggle('hidden',!(real&&!ME));$('#acct').classList.toggle('hidden',!(real&&ME));
   if(real&&ME)$('#acct-name').textContent=ME.name+' · '+ME.role+(ME.is_external?' (agency)':'');
   document.querySelector('#nav [data-tab=users]').classList.toggle('hidden',!(real&&ME&&ME.role==='admin'));
   $('#main').querySelectorAll('[data-tour-only]').forEach(x=>x.classList.toggle('hidden',real));
 }
-$('#signin').onsubmit=e=>{e.preventDefault();run(async()=>{
-  try{ME=await api('/api/login',{json:{email:$('#email').value,password:$('#password').value,code:$('#code').value}})}
-  catch(err){if(err.data&&err.data.mfa_required){$('#code').classList.remove('hidden');$('#code').focus()}throw err}
-  $('#password').value='';$('#code').value='';$('#code').classList.add('hidden');CUR=null;DETAIL=null;KBDATA=null;afterLogin()})};
+document.addEventListener('submit',e=>{
+  if(e.target.id!=='signin')return;e.preventDefault();
+  const err=$('#login-err'),btn=e.target.querySelector('button[type=submit]');err.textContent='';btn.disabled=true;
+  (async()=>{
+    try{ME=await api('/api/login',{json:{email:$('#email').value,password:$('#password').value,code:$('#code').value}})}
+    catch(ex){
+      ME=null;
+      if(ex.data&&ex.data.mfa_required){$('#code-row').classList.remove('hidden');$('#code').focus()}
+      err.textContent=ex.message;return}
+    finally{btn.disabled=false}
+    history.replaceState({},'','/');document.title='BrandGuard';
+    CUR=null;DETAIL=null;KBDATA=null;afterLogin()})()});
 $('#signout').onclick=()=>run(async()=>{await api('/api/logout',{json:{}});signedOut('Signed out.')});
 $('#mfa').onclick=()=>run(async()=>{
   if(ME.mfa){const pw=prompt('To turn two-step sign-in off, enter your password');if(pw===null)return;

@@ -137,7 +137,7 @@ input[type=file]::file-selector-button{font:inherit;background:var(--raised);col
 input[type=file]::file-selector-button:hover{border-color:#a78bfa}
 
 /* Layout helpers (replace inline styles so the CSP can refuse inline CSS) */
-#pass,#password{width:130px;flex:none}#who{width:auto}#email{width:170px;flex:none}#code{width:110px;flex:none}
+#pass{width:130px;flex:none}#who{width:auto}
 .u-blk-m8{display:block;margin-top:8px}.u-between{justify-content:space-between}.u-m0{margin:0}.u-mt12{margin-top:12px}
 .u-title{margin:0;font-size:18px}.u-plain{text-decoration:none;color:inherit}.u-m8-0-0{margin:8px 0 0}
 .u-warn-m6{color:var(--amber);margin:6px 0 0}.u-m6-0-0{margin:6px 0 0}.u-mt14{margin-top:14px}.u-my8{margin:8px 0}
@@ -315,3 +315,17 @@ header h1::before{display:none}
 }
 @keyframes landing-rise{from{opacity:0;transform:translateY(13px)}to{opacity:1;transform:translateY(0)}}
 @keyframes landing-float{0%,100%{translate:0 0}50%{translate:0 -6px}}
+
+/* Sign-in page */
+.login-wrap{display:grid;place-items:center;min-height:calc(100vh - 140px);padding:16px 0}
+.login-card{width:100%;max-width:400px;padding:28px;border:1px solid transparent;border-radius:16px;display:grid;gap:8px;
+  background:linear-gradient(var(--card),var(--card)) padding-box,var(--g) border-box;box-shadow:0 0 44px #7c3aed33}
+.login-card h2{margin:6px 0 0;font-size:22px;letter-spacing:-.01em}
+.login-card p{margin:0}
+.login-card form{display:grid;gap:6px;margin-top:10px}
+.login-card label{font-size:13px;color:var(--mute);margin-top:6px}
+.login-card input{padding:10px 12px}
+.login-err{min-height:1.4em;color:var(--red);margin-top:4px}
+.login-go{margin-top:4px;padding:11px 16px;font-size:15px}
+.login-back{color:var(--accent)}
+a.btn{text-decoration:none;display:inline-block}

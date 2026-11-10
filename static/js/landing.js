@@ -73,4 +73,34 @@ function landing(note){
     <footer class="landing-footer"><span><img src="/static/brandguard-mark.svg" alt="" width="20" height="20"> BrandGuard</span><span>Brand integrity, made actionable.</span><span>BUILT FOR CLEARER DECISIONS</span></footer>
   </div>`;
 }
-function focusSignin(){const el=AUTH==='accounts'?$('#email'):$('#who');if(el){el.scrollIntoView({block:'nearest',behavior:'smooth'});el.focus()}}
+function focusSignin(){if(AUTH==='accounts'){goLogin();return}const el=$('#who');if(el){el.scrollIntoView({block:'nearest',behavior:'smooth'});el.focus()}}
+
+/* Public screens in accounts mode: the front page at "/" and a separate sign-in page at "/login". */
+function showPublic(note){
+  if(AUTH==='accounts'&&location.pathname==='/login')loginView(note);
+  else{if(location.pathname!=='/')history.replaceState({},'','/');document.title='BrandGuard';landing(note)}}
+function goLogin(){
+  if(AUTH!=='accounts'){focusSignin();return}
+  history.pushState({},'','/login');loginView()}
+function goHome(){history.pushState({},'','/');document.title='BrandGuard';landing()}
+function loginView(note){
+  document.title='Sign in · BrandGuard';
+  $('#main').innerHTML=`<div class="login-wrap"><section class="login-card" aria-labelledby="login-h">
+    <img src="/static/brandguard-mark.svg" width="36" height="36" alt="">
+    <h2 id="login-h">Sign in to BrandGuard</h2>
+    <p class="muted small">Use the work email and password your administrator gave you.</p>
+    ${note?`<p class="small" role="status">${esc(note)}</p>`:''}
+    <form id="signin" autocomplete="on">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+      <div id="code-row" class="hidden"><label for="code">6-digit code from your authenticator app</label>
+        <input type="text" id="code" inputmode="numeric" pattern="[0-9 ]*" autocomplete="one-time-code"></div>
+      <p id="login-err" class="login-err small" role="alert"></p>
+      <button class="btn primary login-go" type="submit">Sign in</button>
+    </form>
+    <p class="small"><a href="/" data-c="goHome" class="login-back">Back to the home page</a></p>
+  </section></div>`;
+  $('#email').focus()}
+window.addEventListener('popstate',()=>{if(!ME&&AUTH==='accounts')showPublic()});

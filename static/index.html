@@ -23,12 +23,7 @@
   <label class="small muted" for="who">Signed in as</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off">
   <select id="who" aria-label="Signed in as"></select>
-  <form id="signin" class="hidden row" autocomplete="on">
-    <input type="email" id="email" placeholder="Email" aria-label="Email" autocomplete="username" required>
-    <input type="password" id="password" placeholder="Password" aria-label="Password" autocomplete="current-password" required>
-    <input type="text" id="code" class="hidden" inputmode="numeric" pattern="[0-9 ]*" placeholder="6-digit code" aria-label="Authenticator code" autocomplete="one-time-code">
-    <button class="btn primary" type="submit">Sign in</button>
-  </form>
+  <a href="/login" id="hdr-signin" class="btn primary hidden" data-c="goLogin">Sign in</a>
   <span id="acct" class="hidden row"><span class="small muted" id="acct-name"></span>
     <button class="btn" id="mfa" type="button">Two-step sign-in</button>
     <button class="btn" id="chpw" type="button">Change password</button>
