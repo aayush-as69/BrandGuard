@@ -123,3 +123,33 @@ def test_sign_in_has_its_own_page(page):
     page.goto(page.url.rstrip("/") + "/login")                        # opening /login directly while signed in goes to the app
     page.wait_for_selector("#acct:not(.hidden)")
     assert "/login" not in page.url
+
+
+def test_try_demo_fills_the_sign_in_form_and_signs_in(tmp_path_factory, monkeypatch):
+    """Landing 'Try demo' -> /login with the demo account filled in -> signed in as the manager."""
+    import threading
+    from werkzeug.serving import make_server
+    from playwright.sync_api import sync_playwright
+    from brandguard.app import create_app
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", ADMIN)
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", PW)
+    monkeypatch.setenv("BRANDGUARD_SEED_DEMO", "1")
+    monkeypatch.setenv("BRANDGUARD_DEMO_PASSWORD", "brandguard")
+    app = create_app(str(tmp_path_factory.mktemp("d") / "d.db"))
+    srv = make_server("127.0.0.1", 5081, app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            pg.goto("http://127.0.0.1:5081/")
+            pg.click("text=Try demo")
+            pg.wait_for_selector("#email")
+            assert pg.input_value("#email") == "arjun@brewline.demo" and pg.input_value("#password") == "brandguard"
+            pg.click("#signin button[type=submit]")
+            pg.wait_for_selector("#acct:not(.hidden)")
+            assert "manager" in pg.inner_text("#acct-name")
+            b.close()
+    finally:
+        srv.shutdown()

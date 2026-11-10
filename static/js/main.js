@@ -1,6 +1,6 @@
 /* Click and key dispatch (no inline handlers, so the CSP can forbid inline script), then start */
 /* One delegated listener replaces inline handlers, so the page can run under a CSP with no inline script. */
-const ACTIONS={render,focusSignin,demoLogin,goLogin,goHome,moreContent,tourStart,tourStep,tourDo,tourClose,act,addImgRow,comment,createContent,decide,decideDismiss,decideEdit,doImport,kbDel,kbEdit,loadDemo,openContent,removeRow,reqChanges,revise,seed,showNew,toggle};
+const ACTIONS={render,focusSignin,demoLogin,demoFill,jump,goLogin,goHome,moreContent,tourStart,tourStep,tourDo,tourClose,act,addImgRow,comment,createContent,decide,decideDismiss,decideEdit,doImport,kbDel,kbEdit,loadDemo,openContent,removeRow,reqChanges,revise,seed,showNew,toggle};
 function dispatch(t){
   const fn=ACTIONS[t.dataset.c];if(!fn)return;
   let args=[];try{args=t.dataset.a?JSON.parse(t.dataset.a):[]}catch(e){}
