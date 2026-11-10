@@ -60,6 +60,7 @@ def sign_in(pg, email, password=PW):
 
 
 def sign_out(pg):
+    pg.click("#acct-btn")
     pg.click("#signout")
     pg.wait_for_selector("#hdr-signin:not(.hidden)")
 
@@ -150,11 +151,31 @@ def test_try_demo_fills_the_sign_in_form_and_signs_in(tmp_path_factory, monkeypa
             pg.click("#signin button[type=submit]")
             pg.wait_for_selector("#acct:not(.hidden)")
             assert "manager" in pg.inner_text("#acct-name")
-            pg.select_option("#demo-role", "reviewer")                    # the role switch in the header
-            pg.wait_for_function("document.querySelector('#acct-name').textContent.includes('reviewer')") if False else None
+            pg.click("#acct-btn")                                            # the role switch lives in the account menu
+            pg.select_option("#demo-role", "reviewer")
             pg.locator("#acct-name", has_text="reviewer").wait_for()
+            pg.click("#acct-btn")
             pg.select_option("#demo-role", "agency")
             pg.locator("#acct-name", has_text="agency").wait_for()
             b.close()
     finally:
         srv.shutdown()
+
+
+def test_account_menu_and_in_page_dialogs(page):
+    sign_in(page, ADMIN)
+    assert page.locator("#hdr-signin").is_hidden()                       # no Sign in button once signed in
+    assert page.locator("#chpw").is_hidden()                              # the actions live inside the menu
+    page.click("#acct-btn")
+    assert page.get_attribute("#acct-btn", "aria-expanded") == "true"
+    page.click("#chpw")
+    page.wait_for_selector("dialog.dlg[open]")                             # an in-page dialog, not a browser prompt
+    page.fill("#dlg-cur", PW); page.fill("#dlg-nw", "another-long-pass"); page.fill("#dlg-again", "different-long-pass")
+    page.click("dialog.dlg [type=submit]")
+    page.locator(".dlg-err", has_text="do not match").wait_for()          # error shown in the dialog, which stays open
+    page.click("dialog.dlg [data-cancel]")
+    page.wait_for_selector("dialog.dlg", state="detached")
+    page.click("#acct-btn"); page.click("#mfa")
+    page.wait_for_selector("dialog.dlg .dlg-secret code")                  # the setup key is shown for copying
+    page.keyboard.press("Escape")
+    page.wait_for_selector("dialog.dlg", state="detached")

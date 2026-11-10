@@ -23,15 +23,18 @@
   <label class="small muted" for="who">Role</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off">
   <select id="who" aria-label="Signed in as"></select>
-  <label class="small muted hidden" id="demo-role-l" for="demo-role">Role</label>
-  <select id="demo-role" class="hidden" aria-label="Switch demo role">
-    <option value="manager">Manager · Arjun</option><option value="reviewer">Reviewer · Meera</option>
-    <option value="creator">Creator · Rahul</option><option value="agency">Agency writer · Neha</option></select>
   <a href="/login" id="hdr-signin" class="btn primary hidden" data-c="goLogin">Sign in</a>
-  <span id="acct" class="hidden row"><span class="small muted" id="acct-name"></span>
-    <button class="btn" id="mfa" type="button">Two-step sign-in</button>
-    <button class="btn" id="chpw" type="button">Change password</button>
-    <button class="btn" id="signout" type="button">Sign out</button></span>
+  <span id="acct" class="acct hidden">
+    <button class="btn acct-btn" id="acct-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="acct-menu"><span id="acct-name"></span><span aria-hidden="true">▾</span></button>
+    <div class="acct-menu hidden" id="acct-menu" role="menu">
+      <div id="acct-role-row" class="hidden"><label for="demo-role" class="small muted">Switch demo role</label>
+        <select id="demo-role" aria-label="Switch demo role">
+          <option value="manager">Manager · Arjun</option><option value="reviewer">Reviewer · Meera</option>
+          <option value="creator">Creator · Rahul</option><option value="agency">Agency writer · Neha</option></select></div>
+      <button class="btn" id="chpw" type="button" role="menuitem">Change password</button>
+      <button class="btn" id="mfa" type="button" role="menuitem">Two-step sign-in</button>
+      <button class="btn" id="signout" type="button" role="menuitem">Sign out</button>
+    </div></span>
 </header>
 <main id="main"></main>
 <aside id="tour" class="hidden" role="dialog" aria-labelledby="tour-h" aria-live="polite">
