@@ -56,3 +56,26 @@ def test_pdf_running_headers_and_page_numbers_are_dropped():
     assert "Brewline Brand Guide" not in out and "Page 2" not in out
     assert "Rule 3: keep it warm." in out
     assert kb._drop_running_lines(pages[:2]) == pages[:2]
+
+
+def test_two_workers_bootstrapping_the_admin_at_once_do_not_crash(tmp_path, monkeypatch):
+    """Render's gunicorn started two workers; both saw 'no admin yet' and the second insert hit the unique email."""
+    from brandguard import app as appmod, db as dbm
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "boss@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "correct-horse-battery")
+    path = str(tmp_path / "r.db")
+    first = dbm.connect(path); dbm.init(first, demo_users=False)
+    appmod._bootstrap_admin(first, True)
+
+    class Stale:   # a second worker whose first look ("is there an admin?") happened before the first worker's insert
+        def __init__(self, c): self.c, self.n = c, 0
+        def execute(self, sql, *a):
+            if "role='admin'" in sql and self.n == 0:
+                self.n += 1
+                return dbm.connect(":memory:").execute("SELECT 1 WHERE 0")
+            return self.c.execute(sql, *a)
+        def __getattr__(self, name): return getattr(self.c, name)
+
+    appmod._bootstrap_admin(Stale(dbm.connect(path)), True)   # must not raise
+    n = first.execute("SELECT COUNT(*) FROM users WHERE email='boss@example.com'").fetchone()[0]
+    assert n == 1

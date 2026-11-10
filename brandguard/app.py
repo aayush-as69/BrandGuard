@@ -85,9 +85,18 @@ def _bootstrap_admin(c: sqlite3.Connection, required: bool) -> None:
                                "for the first start (you can remove them afterwards).")
         return
     _check_password_strength(password)
-    c.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
-              ("Administrator", "admin", 0, email, generate_password_hash(password)))
-    c.commit()
+    try:
+        c.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
+                  ("Administrator", "admin", 0, email, generate_password_hash(password)))
+        c.commit()
+    except sqlite3.IntegrityError:
+        # Several workers start at once and all see "no admin yet"; the first insert wins. That is fine
+        # if an admin exists now. If the email belongs to someone who is not an admin, say so plainly.
+        c.rollback()
+        if c.execute("SELECT 1 FROM users WHERE role='admin' AND active=1 AND password_hash IS NOT NULL").fetchone():
+            return
+        raise RuntimeError(f"BRANDGUARD_ADMIN_EMAIL ({email}) is already used by an account that is not an active "
+                           "admin. Use another email, or fix that account.") from None
 
 
 def create_app(db_path: str | None = None, llm_call=None) -> Flask:
