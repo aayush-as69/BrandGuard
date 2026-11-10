@@ -8,7 +8,7 @@
 
 # Security model
 
-**Accounts.** Email and password, hashed with scrypt, minimum 10 characters, failed sign-ins throttled per address and per email. Demo deployments may expose a separate prefilled **Try demo** entry point; it must not be enabled for real-content production environments. Demo role switching uses the existing authenticated demo session rather than repeatedly submitting credentials.
+**Accounts.** Email and password, hashed with scrypt, minimum 10 characters, failed sign-ins throttled per address and per email. Demo deployments may expose a separate prefilled **Try demo** entry point; it must not be enabled for real-content production environments. Demo role switching uses the existing authenticated demo session rather than repeatedly submitting credentials, and only hops between the seeded demo accounts (never to the real admin). Because those accounts share one public password, the server refuses password changes and two-step setup for them, so a visitor cannot lock the others out.
 Sessions are signed, HttpOnly, SameSite=Lax cookies (Secure in production) valid for 8 hours and tied to a per-user epoch,
 so deactivating a user, changing their role or password ends their sessions immediately. The last active admin cannot be removed.
 

@@ -72,7 +72,8 @@ Brand reviews often depend on scattered documents, memory, and subjective feedba
 - Printable approval records with cited sources and audit history.
 - Guideline insights for managers, reviewers, and admins.
 - A public landing page and a separate sign-in page (`/login`) for real accounts.
-- A separate **Try demo** path can prefill the configured demo credentials; demo role switching happens inside the demo session without another email/password login.
+- A separate **Try demo** path can prefill the configured demo credentials; demo role switching happens inside the demo session, from the account menu, without another email/password login.
+- A compact header: signed in, one account menu holds Change password, Two-step sign-in, Sign out and (on demo accounts) the role switch. Password and two-step changes use in-page dialogs, not browser pop-ups.
 - Guided demo tour, keyboard support, responsive layouts, and contrast checks.
 - Health endpoint, structured logs, migrations, backup/restore tooling, Docker support, and CI checks.
 
@@ -151,7 +152,7 @@ The included demo uses **Brewline Coffee**, a fictional brand. All seeded conten
 
 1. Select **Try demo** on the landing page when demo seeding is enabled.
 2. Sign in once with the prefilled demo credentials.
-3. Use the **Role** selector in the header to explore Creator, Manager, Reviewer, and Admin without another email/password login.
+3. Open the account menu (your name, top right) and use **Switch demo role** to explore Manager, Reviewer, Creator and Agency writer without another login. The real admin signs in separately.
 4. Open **Knowledge base** and select *Load Brewline demo knowledge base* if the seeded workspace is empty.
 5. Open **New**, load the demo email, and select **Review now**.
 6. Inspect the source-backed findings. Accept or edit a suggestion, or dismiss it with a reason.
