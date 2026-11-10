@@ -45,13 +45,13 @@ def render(d: dict, viewer: str) -> str:
               else f"<b>Not approved.</b> Status: {e(STATUS.get(c['status'], c['status']))}. This is a snapshot, not a clearance.")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Approval record: {e(c['title'])}</title><style>
-body{{font:15px/1.55 system-ui,sans-serif;color:#e8ecf6;background:#0a0f1f;max-width:900px;margin:24px auto;padding:0 16px;color-scheme:dark}}
-h1{{font-size:22px;margin:0}}h2{{font-size:16px;margin:26px 0 8px;border-bottom:1px solid #2a3656;padding-bottom:4px}}
-table{{border-collapse:collapse;width:100%;font-size:13px}}td,th{{border:1px solid #2a3656;padding:6px 8px;text-align:left;vertical-align:top}}
-.m{{color:#98a4bf;font-size:12px}}.banner{{padding:10px 12px;border-radius:10px;margin:12px 0;background:{'#123626' if approved else '#3b2f14'};border:1px solid {'#5fd49a' if approved else '#f2b84b'}}}
-pre{{white-space:pre-wrap;background:#0d1427;border:1px solid #2a3656;border-radius:10px;padding:12px;font:inherit}}
-button{{font:inherit;padding:7px 13px;background:#18233f;color:#e8ecf6;border:1px solid #2a3656;border-radius:9px;cursor:pointer}}
-button:focus-visible{{outline:2px solid #62d9cf;outline-offset:2px}}
+body{{font:15px/1.55 system-ui,sans-serif;color:#f1f0ff;background:#050507;max-width:900px;margin:24px auto;padding:0 16px;color-scheme:dark}}
+h1{{font-size:22px;margin:0}}h2{{font-size:16px;margin:26px 0 8px;border-bottom:1px solid #2f2f58;padding-bottom:4px}}
+table{{border-collapse:collapse;width:100%;font-size:13px}}td,th{{border:1px solid #2f2f58;padding:6px 8px;text-align:left;vertical-align:top}}
+.m{{color:#a9a6cc;font-size:12px}}.banner{{padding:10px 12px;border-radius:10px;margin:12px 0;background:{'#123626' if approved else '#3b2f14'};border:1px solid {'#5fd49a' if approved else '#f2b84b'}}}
+pre{{white-space:pre-wrap;background:#0a0a14;border:1px solid #2f2f58;border-radius:10px;padding:12px;font:inherit}}
+button{{font:inherit;padding:7px 13px;background:#171730;color:#f1f0ff;border:1px solid #2f2f58;border-radius:9px;cursor:pointer}}
+button:focus-visible{{outline:2px solid #c4b5fd;outline-offset:2px}}
 @media print{{body{{color:#0f172a;background:#fff;color-scheme:light}}h2,td,th{{border-color:#cbd5e1}}.m{{color:#475569}}
 .banner{{background:{'#f0fdf4' if approved else '#fff7ed'};border-color:{'#166534' if approved else '#9a3412'}}}pre{{background:#f8fafc;border-color:#cbd5e1}}button{{display:none}}}}</style></head><body>
 <p class="m">BrandGuard approval record. Synthetic demo data. Generated {e(_when(dt.datetime.now(dt.timezone.utc).isoformat()))} for {e(viewer)}.</p>

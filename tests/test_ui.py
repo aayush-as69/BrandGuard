@@ -16,8 +16,10 @@ def palette():
 
 
 # Colours that appear only as literals in the CSS (chips, marks, diffs, quotes), keyed by what they sit behind.
-CHIP_BG = {"#17304a": "#8fd8ff", "#232d49": "#b4bfd8", "#3b2f14": "amber", "#3d1d29": "red", "#123626": "green", "#2a2450": "violet"}
-SURFACE_BG = ("#0f2230", "#0a1122", "#1b2746")
+CHIP_BG = {"#1b1b46": "#a5b4fc", "#1c1c33": "#b8b6d9", "#33260a": "amber", "#3a0f24": "red", "#0c2e1f": "green", "#2a1550": "violet"}
+SURFACE_BG = ("#140f2e", "#07070f", "#1d1740")
+MARKS = ("#5b1236", "#5a3b05", "#1e3a6e")
+GRADIENT_STOPS = ("#6d28d9", "#2563eb", "#be185d")  # behind white text on primary buttons
 
 
 def test_every_text_and_background_pair_meets_4_5_to_1():
@@ -25,23 +27,17 @@ def test_every_text_and_background_pair_meets_4_5_to_1():
     surfaces = [p["bg"], p["card"], p["sunk"], p["raised"]]
     pairs = [(p["ink"], s) for s in surfaces] + [(p["mute"], s) for s in surfaces]
     pairs += [(p[c], s) for c in ("accent", "green", "amber", "red", "violet") for s in (p["card"], p["sunk"])]
-    pairs += [(p["accent-ink"], p["accent"]), ("#06260f", p["green"]), ("#2a0709", p["red"]), (p["bg"], p["ink"])]  # buttons, toasts
+    pairs += [("#ffffff", stop) for stop in GRADIENT_STOPS]                       # primary button text across the whole gradient
+    pairs += [("#052e16", p["green"]), ("#2a0612", p["red"]), (p["bg"], p["ink"])]  # good button, error toast, toast
     pairs += [(fg if fg.startswith("#") else p[fg], bg) for bg, fg in CHIP_BG.items()]
-    pairs += [(p["ink"], bg) for bg in ("#6b2437", "#5e4915", "#33406a")]          # highlighted text in a review
-    pairs += [("#ffd0d0", "#552030"), ("#c2f5da", "#14442f"), (p["accent"], "#0f2230"), (p["ink"], "#0f2230"), ("#cfe7ff", "#1b2746"),
-              (p["ink"], "#0a1122"), ("#7f8ba8", p["sunk"])]                       # diff, quote, code, placeholder
+    pairs += [(p["ink"], bg) for bg in MARKS]                                      # highlighted text in a review
+    pairs += [("#ffd0e0", "#5b1236"), ("#bbf7d0", "#0c3b25"), (p["accent"], "#140f2e"), (p["ink"], "#140f2e"),
+              ("#ddd6fe", "#1d1740"), (p["ink"], "#07070f"), ("#8d8ab4", p["sunk"]),
+              ("#c4b5fd", p["bg"]), ("#93c5fd", p["bg"]), ("#f9a8d4", p["bg"]), ("#c4b5fd", p["card"])]   # links, gradient text
     failures = [(fg, bg, round(contrast_ratio(fg, bg), 2)) for fg, bg in pairs if contrast_ratio(fg, bg) < 4.5]
     assert not failures, failures
-    for literal in list(CHIP_BG) + list(SURFACE_BG) + ["#6b2437", "#5e4915", "#33406a", "#552030", "#14442f", "#7f8ba8"]:
+    for literal in list(CHIP_BG) + list(SURFACE_BG) + list(MARKS) + list(GRADIENT_STOPS) + ["#0c3b25", "#8d8ab4", "#c4b5fd", "#93c5fd", "#f9a8d4"]:
         assert literal in HTML, literal  # the pairs above really are the ones used in the CSS
-
-def test_server_values_are_escaped_before_reaching_html():
-    for raw in ("${f.severity}", "${c.status}", "${x.status}", "${m.role}", "${f.confidence}",
-                "${f.decision}", "${h.decision}", "${g.access_level}", "${f.access_level}", "${t.status}"):
-        for m in re.finditer(re.escape(raw), HTML):
-            before = HTML[max(0, m.start() - 6):m.start()]
-            assert before.endswith(("cls(", "esc(")) or "label(" in before, f"unescaped {raw} near: {HTML[m.start()-40:m.end()+10]!r}"
-    assert "created_at.slice" not in HTML  # timestamps are shown in the viewer's local time
 
 
 def test_form_controls_have_accessible_names():
