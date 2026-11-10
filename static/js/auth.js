@@ -4,7 +4,7 @@ async function boot(){
   try{const cfg=cfg2=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
   if(AUTH==='accounts'){
     document.querySelectorAll('.tour-only').forEach(x=>x.classList.add('hidden'));
-    $('#main').innerHTML='<div class="card"><h2>Welcome to BrandGuard</h2><p class="muted">Sign in with your work email to continue.</p></div>';
+    landing();
     try{ME=await api('/api/me');afterLogin()}
     catch(e){
       if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});afterLogin();return}catch(e2){}}
@@ -12,7 +12,7 @@ async function boot(){
     return}
   USERS=await api('/api/users');
   $('#who').innerHTML='<option value="">Choose…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.name)} · ${u.role}${u.is_external?' (agency)':''}</option>`).join('');
-  try{ME=await api('/api/me');$('#who').value=ME.id;afterLogin()}catch(e){}
+  try{ME=await api('/api/me');$('#who').value=ME.id;afterLogin()}catch(e){landing()}
 }
 $('#who').onchange=e=>run(async()=>{
   if(!e.target.value){await api('/api/logout',{json:{}});signedOut('Signed out. Pick a user to begin.');return}
