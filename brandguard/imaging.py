@@ -29,7 +29,11 @@ def analyse(data: bytes) -> dict:
         img.verify()
         img = Image.open(io.BytesIO(data))
         width, height = img.size
+        if width * height > MAX_PIXELS:  # check the declared size before decoding: a small file can unpack to gigabytes
+            raise ImageError("That image has too many pixels (limit 25 million)")
         img = img.convert("RGBA")
+    except ImageError:
+        raise
     except Exception as exc:
         raise ImageError("That file is not an image this server can read (use PNG, JPEG, GIF or WebP)") from exc
     img.thumbnail((160, 160))

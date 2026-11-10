@@ -8,6 +8,7 @@ services:
     envVars:
       - { key: BRANDGUARD_ENV, value: production }
       - { key: BRANDGUARD_AUTH, value: accounts }
+      - { key: BRANDGUARD_TRUSTED_PROXIES, value: "1" }  # Render's load balancer sits in front
       - { key: BRANDGUARD_SECRET, generateValue: true }
       - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
       - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
