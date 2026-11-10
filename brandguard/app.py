@@ -472,8 +472,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise ValueError("A name and a valid email are required")
         if role not in ROLES:
             raise ValueError("Role must be one of: " + ", ".join(ROLES))
-        if role == "admin" and data.get("is_external"):
-            raise ValueError("An agency (external) user cannot be an admin")
+        if data.get("is_external") and role != "creator":
+            raise ValueError("An agency (external) account can only be a writer (creator)")
         pw = generate_password_hash(_check_password_strength(data.get("password")))
         cur = c.execute("INSERT INTO users(name, role, is_external, email, password_hash) VALUES (?,?,?,?,?)",
                         (name, role, 1 if data.get("is_external") else 0, email, pw))
@@ -495,8 +495,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         external = 1 if data.get("is_external", bool(row["is_external"])) else 0
         if role not in ROLES:
             raise ValueError("Role must be one of: " + ", ".join(ROLES))
-        if role == "admin" and external:
-            raise ValueError("An agency (external) user cannot be an admin")
+        if external and role != "creator":
+            raise ValueError("An agency (external) account can only be a writer (creator)")
         if row["role"] == "admin" and (role != "admin" or not active) and other_admins(c, user_id) == 0:
             raise ValueError("There must always be at least one active admin")
         sets, args = ["role=?", "active=?", "is_external=?"], [role, active, external]
@@ -606,8 +606,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         elif kind in ("facts", "glossary", "assets", "settings"):
             try:
                 payload = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{kind} must be valid JSON: {exc}") from exc
+            except (json.JSONDecodeError, RecursionError) as exc:
+                raise ValueError(f"{kind} must be valid JSON" + (f": {exc}" if isinstance(exc, json.JSONDecodeError) else " (too deeply nested)")) from exc
             fn = {"facts": kbm.import_facts, "glossary": kbm.import_glossary,
                   "assets": kbm.import_assets, "settings": kbm.import_settings}[kind]
             if kind != "settings" and not isinstance(payload, list):
@@ -749,8 +749,9 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.get("/api/insights")
     def insights_view():
-        if me()["role"] not in ("admin", "manager", "reviewer"):
-            raise Forbidden("Insights are for managers, reviewers and admins")
+        user = me()
+        if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
+            raise Forbidden("Insights are for your own managers, reviewers and admins")
         return jsonify(insights.compute(conn()))
 
     @app.get("/api/llm-log")
@@ -758,7 +759,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         """Record of what was sent to the AI service. Managers and reviewers see the metadata; the full text of a
         request (only kept when BRANDGUARD_AI_LOG=full) is for admins."""
         user = me()
-        if user["role"] not in ("admin", "manager", "reviewer"):
+        if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
             raise Forbidden("Not allowed")
         rows = [dict(r) for r in conn().execute(
             "SELECT id, content_id, version, model, content_sha256, chars, rules, status, payload, created_at "
