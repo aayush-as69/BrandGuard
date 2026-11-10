@@ -57,7 +57,7 @@ Demo walkthrough: sign in as **Ira (admin)** → Knowledge base → *Load Brewli
 Sign in as **Neha (agency creator)** → New → *Load demo email* → *Review now*.
 Fix findings, *Submit for approval*, then sign in as **Arjun (manager)** or **Meera (reviewer)** to approve.
 
-Optional AI judge: `export ANTHROPIC_API_KEY=...`, or for any OpenAI-compatible provider set `BRANDGUARD_LLM_BASE_URL` (https), `BRANDGUARD_LLM_API_KEY` and `BRANDGUARD_MODEL` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
+Optional AI judge (BharatCode: base URL `https://bharatcode.ai/api/model/v1`, model `qwen-3.8-27b`, key from bharatcode.ai/account): `export ANTHROPIC_API_KEY=...`, or for any OpenAI-compatible provider set `BRANDGUARD_LLM_BASE_URL` (https), `BRANDGUARD_LLM_API_KEY` and `BRANDGUARD_MODEL` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
 The content is sent to the AI service only when it is first reviewed, when its author edits it, or when someone presses *Re-run review*. Accepting a fix does not re-send it; earlier AI suggestions are carried over and re-located in the new text.
 
 ## Code layout
