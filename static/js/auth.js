@@ -1,7 +1,7 @@
 /* Sign-in, accounts menu, two-step sign-in, passwords, app start-up helpers */
 async function boot(){
   let cfg2={};
-  try{const cfg=cfg2=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
+  try{const cfg=cfg2=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;DEMO={available:!!cfg.demo_available,email:cfg.demo_email||'',password:cfg.demo_password||''};$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
   if(AUTH==='accounts'){
     document.querySelectorAll('.tour-only').forEach(x=>x.classList.add('hidden'));
     try{ME=await api('/api/me')}catch(e){ME=null}
@@ -35,7 +35,7 @@ function afterLogin(){
   if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights')||(TAB==='users'&&ME.role!=='admin'))TAB='content';
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===TAB));
   accountUI();return render()}
-let AUTH='demo',AICFG={enabled:false};
+let AUTH='demo',AICFG={enabled:false},DEMO={available:false,email:'',password:''};
 const aiBox=id=>AICFG.enabled?`<label class="u-blk-m8 small"><input type="checkbox" id="${id}" checked> Use AI to judge tone <span class="muted">(sends this text to ${esc(AICFG.provider||'the AI provider')})</span></label><p class="small muted">${esc(AICFG.notice||'')}</p>`:'';
 const useAI=id=>{const b=document.getElementById(id);return b?b.checked:true};
 function accountUI(){
