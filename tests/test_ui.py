@@ -96,3 +96,12 @@ def test_every_script_file_is_linked_once_and_in_dependency_order(app):
     linked = re.findall(r'src="/static/js/([a-z]+\.js)"', page)
     assert sorted(linked) == sorted(f.name for f in JS_FILES) and len(set(linked)) == len(linked)
     assert linked[0] == "core.js" and linked[-1] == "main.js"  # helpers first, dispatch and start-up last
+
+
+def test_no_inline_styles_and_style_src_is_strict(app):
+    assert 'style="' not in HTML and "setAttribute('style'" not in HTML  # layout lives in CSS classes
+    csp = app.test_client().get("/").headers["Content-Security-Policy"]
+    style_src = [d for d in csp.split(";") if d.strip().startswith("style-src")][0]
+    assert "'unsafe-inline'" not in style_src
+    rec = (STATIC / "record.css").read_text(encoding="utf-8")
+    assert "@media print" in rec  # the approval record stays printable on paper

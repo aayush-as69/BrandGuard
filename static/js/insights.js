@@ -15,11 +15,11 @@ async function renderInsights(){
    <div class="card"><h2>Repeated mistakes</h2>
     <p class="muted small">How often each rule or fact flagged a first draft. Rules that keep repeating may need clearer wording or training.</p>
     ${d.rules.length?`<table>${d.rules.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td><b>${esc(r.title)}</b></td>
-      <td style="width:35%"><div class="meter" role="img" aria-label="${r.flagged} flags"><i style="width:${Math.round(100*r.flagged/top)}%"></i></div></td>
+      <td class="u-w35"><div class="meter" role="img" aria-label="${r.flagged} flags"><i data-w="${Math.round(100*r.flagged/top)}"></i></div></td>
       <td>${r.flagged}</td></tr>`).join('')}</table>`:'<p class="muted small">No findings yet. Review some content first.</p>'}</div>
    <div class="card"><h2>Often disputed</h2>
     <p class="muted small">Rules where at least half of the decisions were dismissals (with at least 2 decisions). Dismissing is allowed, but a pattern suggests the rule is unclear, outdated or too strict.</p>
-    ${disputed.length?disputed.map(r=>`<div class="item" style="cursor:default"><p><code>${esc(r.code)}</code> <b>${esc(r.title)}</b>
+    ${disputed.length?disputed.map(r=>`<div class="u-cursor-default item"><p><code>${esc(r.code)}</code> <b>${esc(r.title)}</b>
        <span class="chip medium">${Math.round(r.dismissal_rate*100)}% dismissed</span></p>
        <p class="small muted">${r.dismissed} dismissed, ${r.fixed} fixed. Rule text: ${esc(r.quote)}</p></div>`).join('')
      :'<p class="muted small">Nothing is being disputed often. Either the rules are clear, or there is not enough data yet.</p>'}</div>

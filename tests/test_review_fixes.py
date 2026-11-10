@@ -164,3 +164,15 @@ def test_block_pattern_sends_nothing_and_invalid_config_fails_closed(ai_app, mon
     monkeypatch.setenv("BRANDGUARD_AI_BLOCK_PATTERNS", "{broken json")
     cid = n.post("/api/content", title="t2", body="Hi there, our Brewline blend is a cheap way to wake up.", images=[]).get_json()["id"]
     assert ai_app.calls == []  # a broken privacy setting never means "send it anyway"
+
+
+def test_one_attacker_cannot_lock_a_colleague_out_of_their_own_account(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRANDGUARD_AUTH", "accounts")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "boss@example.com")
+    monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "correct-horse-battery")
+    c = create_app(str(tmp_path / "l.db")).test_client()
+    for _ in range(12):  # attacker from one address hammers the boss's account
+        c.post("/api/login", json={"email": "boss@example.com", "password": "guess"}, environ_overrides={"REMOTE_ADDR": "198.51.100.1"})
+    ok = c.post("/api/login", json={"email": "boss@example.com", "password": "correct-horse-battery"},
+                environ_overrides={"REMOTE_ADDR": "203.0.113.5"})  # the real owner, elsewhere
+    assert ok.status_code == 200

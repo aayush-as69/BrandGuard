@@ -7,8 +7,8 @@ async function renderContent(){
   const list=await api('/api/content?limit='+LISTN);
   if(rid!==RID)return;
   $('#main').innerHTML=`<div class="grid"><div class="stack">
-    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Content</h2>
-      <button class="btn primary" data-c="showNew">New</button></div><div style="margin-top:12px" id="list">
+    <div class="card"><div class="u-between row"><h2 class="u-m0">Content</h2>
+      <button class="btn primary" data-c="showNew">New</button></div><div class="u-mt12" id="list">
       ${list.length?list.map(c=>`<div class="item ${c.id===CUR?'on':''}" tabindex="0" role="button" data-kb="1" data-c="openContent" data-a='[${c.id}]'>
         <b>${esc(c.title)}</b><span class="small muted">${esc(c.author)} · v${c.current_version}</span><br>
         <span class="chip ${cls(c.status)}">${label(c.status)}</span>
@@ -62,41 +62,41 @@ async function loadDetail(id,rid){
   const d=DETAIL,c=d.content,p=d.permissions,open=d.findings.filter(f=>f.decision==='open').length;
   const meta=d.review_meta||{};
   $('#detail').innerHTML=`<div class="stack">
-   <div class="card"><div class="row" style="justify-content:space-between">
-     <div><h2 style="margin:0;font-size:18px">${esc(c.title)}</h2>
+   <div class="card"><div class="u-between row">
+     <div><h2 class="u-title">${esc(c.title)}</h2>
        <span class="small muted">by ${esc(c.author)} · version ${c.current_version}</span></div>
      <div class="row"><span class="chip ${cls(c.status)}">${label(c.status)}</span>
        ${p.can_submit?`<button class="btn primary" data-c="act" data-a='["submit"]'>Submit for approval</button>`:''}
        ${p.can_approve?`<button class="btn good" data-c="act" data-a='["approve"]'>Approve</button>`:''}
        ${p.can_request_changes?`<button class="btn warn" data-c="reqChanges">Request changes</button>`:''}
        ${p.can_rerun&&c.status!=='approved'?`<button class="btn" data-c="act" data-a='["review"]'>Re-run review</button>`:''}
-       <a class="btn" style="text-decoration:none;color:inherit" href="/api/content/${+c.id}/record" target="_blank" rel="noopener">Approval record</a></div></div>
-     <p class="small muted" style="margin:8px 0 0">${c.status==='approved'
+       <a class="u-plain btn" href="/api/content/${+c.id}/record" target="_blank" rel="noopener">Approval record</a></div></div>
+     <p class="u-m8-0-0 small muted">${c.status==='approved'
        ?`Approved${c.approved_by?' by '+esc(c.approved_by):''}. This version is locked.`
        :`${open?`${open} finding${open>1?'s':''} still need a decision.`:(d.findings.length?'Every finding has a decision.':'No findings.')} Nothing is applied until a person clicks.`}</p>
-     ${(meta.warnings||[]).map(w=>`<p class="small" style="color:var(--amber);margin:6px 0 0">⚠ ${esc(w)}</p>`).join('')}
-     <p class="small muted" style="margin:6px 0 0">AI judge: ${esc(meta.llm_status||'not used')}${(meta.rejected||[]).length?` · ${(meta.rejected).length} unverifiable suggestion(s) discarded`:''}</p></div>
+     ${(meta.warnings||[]).map(w=>`<p class="u-warn-m6 small">⚠ ${esc(w)}</p>`).join('')}
+     <p class="u-m6-0-0 small muted">AI judge: ${esc(meta.llm_status||'not used')}${(meta.rejected||[]).length?` · ${(meta.rejected).length} unverifiable suggestion(s) discarded`:''}</p></div>
    <div class="grid2">
      <div class="stack"><div class="card"><h3>Content</h3>
         <div class="body" id="body">${highlight(d)}</div>
-        ${d.images.length?`<h3 style="margin-top:14px">Images</h3><table>${d.images.map(i=>`<tr><td><b>${esc(i.name)}</b></td>
+        ${d.images.length?`<h3 class="u-mt14">Images</h3><table>${d.images.map(i=>`<tr><td><b>${esc(i.name)}</b></td>
           <td>alt: ${i.alt?esc(i.alt):'<span class="st-contradicted">missing</span>'}</td>
-          <td>${i.text_color&&i.bg_color?`<span style="background:${esc(i.bg_color)};color:${esc(i.text_color)};padding:1px 8px;border-radius:4px">Aa</span> ${esc(i.text_color)} on ${esc(i.bg_color)}`:''}</td></tr>`).join('')}</table>`:''}
-        ${p.can_revise?`<details style="margin-top:12px"><summary>Edit the text myself</summary>
-          <textarea id="rb" rows="8" aria-label="Edit the content text" style="margin:8px 0">${esc(d.body)}</textarea>
+          <td>${i.text_color&&i.bg_color?`<span class="swatch" data-bg="${esc(i.bg_color)}" data-fg="${esc(i.text_color)}">Aa</span> ${esc(i.text_color)} on ${esc(i.bg_color)}`:''}</td></tr>`).join('')}</table>`:''}
+        ${p.can_revise?`<details class="u-mt12"><summary>Edit the text myself</summary>
+          <textarea class="u-my8" id="rb" rows="8" aria-label="Edit the content text">${esc(d.body)}</textarea>
           ${aiBox('rai')}<button class="btn" data-c="revise">Save as new version</button></details>`:''}</div>
         <div class="card"><h3>Claim check</h3>${d.claims.length?groupClaims(d.claims).map(g=>`<div class="claim">
           <div class="small">${esc(g.text)}</div><div class="tags">${g.tags.map(t=>`<span class="st-${cls(t.status)}">${label(t.status)}${t.source_id?' · '+esc(t.source_id):''}</span>`).join('')}</div></div>`).join('')
           :'<p class="small muted">No promotional claims detected.</p>'}
-          <p class="small muted" style="margin:8px 0 0">Claims are matched to approved facts. “No approved source” is never filled in by guessing.</p></div>
+          <p class="u-m8-0-0 small muted">Claims are matched to approved facts. “No approved source” is never filled in by guessing.</p></div>
         <div class="card"><h3>Discussion</h3>${d.comments.map(m=>`<div class="cmt"><b>${esc(m.author)}</b> <span class="chip">${esc(m.role)}</span>
           <span class="small muted">${when(m.created_at)}</span><br>${esc(m.body)}</div>`).join('')||'<p class="small muted">No comments yet.</p>'}
-          <div class="row" style="margin-top:10px"><input type="text" id="cm" placeholder="Add a comment…" aria-label="Add a comment" maxlength="2000"><button class="btn" data-c="comment">Post</button></div></div>
+          <div class="u-mt10 row"><input type="text" id="cm" placeholder="Add a comment…" aria-label="Add a comment" maxlength="2000"><button class="btn" data-c="comment">Post</button></div></div>
         <div class="card"><h3>Versions</h3>${d.versions.map(v=>`<div class="small"><b>v${v.version}</b> ${esc(v.author)} · ${esc(v.note)} <span class="muted">${when(v.created_at)}</span></div>`).join('')}
-          ${d.audit.length?`<details style="margin-top:10px"><summary>Audit log (${d.audit.length})</summary>${d.audit.map(a=>`<div class="small muted">${when(a.created_at)} · ${esc(a.who||'system')} · <b>${esc(a.action)}</b> ${esc(a.detail)}</div>`).join('')}</details>`:''}</div></div>
+          ${d.audit.length?`<details class="u-mt10"><summary>Audit log (${d.audit.length})</summary>${d.audit.map(a=>`<div class="small muted">${when(a.created_at)} · ${esc(a.who||'system')} · <b>${esc(a.action)}</b> ${esc(a.detail)}</div>`).join('')}</details>`:''}</div></div>
      <div class="card"><h3>Findings (${d.findings.length})</h3>
         ${d.findings.map(f=>findingCard(f,p,c)).join('')||'<p class="muted small">Nothing to fix in this version.</p>'}
-        ${d.history.length?`<details><summary>Resolved in earlier versions (${d.history.length})</summary>${d.history.map(h=>`<div class="small" style="padding:6px 0">
+        ${d.history.length?`<details><summary>Resolved in earlier versions (${d.history.length})</summary>${d.history.map(h=>`<div class="u-py6 small">
           <b>${esc(h.source_id)}</b> ${esc(h.span_text)} → <b>${esc(h.decision_text)}</b> <span class="muted">${esc(h.decision)} by ${esc(h.decided_by_name||'')}</span></div>`).join('')}</details>`:''}</div>
    </div></div>`;
 }
@@ -127,17 +127,17 @@ function findingCard(f,p,c){
     <div class="row"><span class="chip">${esc(f.category)}</span><span class="chip ${cls(f.severity)}">${esc(f.severity)} severity</span>
       <span class="chip">${esc(f.confidence)} confidence</span>${f.ai_generated?'<span class="chip ai">AI-generated</span>':''}
       ${f.needs_reviewer?'<span class="chip high">needs reviewer</span>':''}${f.restricted?'<span class="chip draft" title="Only the brand team can see this fact">🔒 restricted fact</span>':''}</div>
-    <p style="margin:8px 0 4px"><b>${esc(f.issue)}</b></p>
+    <p class="u-m8-0-4"><b>${esc(f.issue)}</b></p>
     <div class="quote"><b>${f.source_type==='fact'?'Approved fact':'Guideline'} ${esc(f.source_id)}:</b> ${esc(f.source_quote)}</div>
     ${f.target==='body'?'<div class="small muted">Flagged text</div>':''}${diff}
-    ${done?`<p class="small" style="margin:6px 0 0"><b>${esc(f.decision)}</b> by ${esc(f.decided_by_name||'')}${f.decision_reason?': '+esc(f.decision_reason):''}</p>`
-    :(p.can_decide?`<div class="row" style="margin-top:8px">
+    ${done?`<p class="u-m6-0-0 small"><b>${esc(f.decision)}</b> by ${esc(f.decided_by_name||'')}${f.decision_reason?': '+esc(f.decision_reason):''}</p>`
+    :(p.can_decide?`<div class="u-mt8 row">
         <button class="btn good" ${fix?'':`disabled title="${f.restricted?'Restricted fact: ask the brand team, or use Edit.':'No suggested fix. Use Edit.'}"`} data-c="decide" data-a='[${f.id},"accept"]'>Accept fix</button>
         <button class="btn" data-c="toggle" data-a='["e${f.id}"]'>Edit</button>
         <button class="btn bad" data-c="toggle" data-a='["d${f.id}"]'>Dismiss</button></div>
-      <div id="e${f.id}" class="hidden row" style="margin-top:8px"><input type="text" id="et${f.id}" aria-label="Replacement text" value="${esc(fix||(f.target==='body'?f.span_text:''))}" style="flex:1">
+      <div id="e${f.id}" class="u-mt8 hidden row"><input class="u-flex1" type="text" id="et${f.id}" aria-label="Replacement text" value="${esc(fix||(f.target==='body'?f.span_text:''))}">
         <button class="btn primary" data-c="decideEdit" data-a='[${f.id}]'>Apply my edit</button></div>
-      <div id="d${f.id}" class="hidden row" style="margin-top:8px"><input type="text" id="dr${f.id}" placeholder="Reason (required)" aria-label="Reason for dismissing" maxlength="500" style="flex:1">
+      <div id="d${f.id}" class="u-mt8 hidden row"><input class="u-flex1" type="text" id="dr${f.id}" placeholder="Reason (required)" aria-label="Reason for dismissing" maxlength="500">
         <button class="btn bad" data-c="decideDismiss" data-a='[${f.id}]'>Dismiss with reason</button></div>`:'')}
   </div>`;
 }

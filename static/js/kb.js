@@ -11,10 +11,10 @@ async function renderKB(){
    ${admin?`<div class="card stack"><h2>Import (admin)</h2>
      <div class="row"><button class="btn primary" data-c="seed">Load Brewline demo knowledge base</button>
        <span class="small muted">Replaces the current knowledge base with synthetic demo data.</span></div>
-     <div class="row"><select id="ik" aria-label="What to import" style="width:auto"><option value="guidelines">Guidelines (PDF, DOCX, TXT, MD)</option>
+     <div class="row"><select class="u-wauto" id="ik" aria-label="What to import"><option value="guidelines">Guidelines (PDF, DOCX, TXT, MD)</option>
         <option value="facts">Approved facts (JSON)</option><option value="glossary">Glossary (JSON)</option>
         <option value="assets">Asset list (JSON)</option></select>
-       <select id="il" aria-label="Access level" style="width:auto"><option>internal</option><option>confidential</option><option>public</option></select>
+       <select class="u-wauto" id="il" aria-label="Access level"><option>internal</option><option>confidential</option><option>public</option></select>
        <input type="file" id="ifile" aria-label="File to import"></div>
      <textarea id="itext" rows="3" aria-label="Pasted text or JSON" placeholder="…or paste text / JSON here"></textarea>
      <div><button class="btn" data-c="doImport">Import</button></div></div>`:''}
