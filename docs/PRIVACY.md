@@ -5,7 +5,7 @@ Content text and image metadata, findings, comments, decisions and an audit trai
 email, role and a password hash. Nothing is sent anywhere unless the AI judge is switched on.
 
 ## The AI judge
-- **Off by default** unless `ANTHROPIC_API_KEY` is set. `BRANDGUARD_LLM=off` forces it off.
+- **Off by default** unless an AI provider is configured (`ANTHROPIC_API_KEY`, or `BRANDGUARD_LLM_BASE_URL` with `BRANDGUARD_LLM_API_KEY` and `BRANDGUARD_MODEL`). `BRANDGUARD_LLM=off` forces it off.
 - **What is sent** when it is on: the content text of that review, plus the few guideline rules that match it. Nothing else:
   no names, emails, other content or restricted facts. **Email addresses, links, money amounts, phone numbers and @handles are masked first** (`[[EMAIL_1]]`)
   and put back in the findings you see. `BRANDGUARD_AI_REDACT=off` turns the masking off. Rule-based checks run locally first; their findings never depend on AI.
