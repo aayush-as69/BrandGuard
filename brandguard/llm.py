@@ -60,6 +60,14 @@ def provider() -> str:
     return "openai" if os.environ.get("BRANDGUARD_LLM_BASE_URL", "").strip() else "anthropic"
 
 
+def provider_name() -> str:
+    """Who receives the text, for the notice shown to authors: "Anthropic", or the host of the configured endpoint."""
+    if provider() == "anthropic":
+        return "Anthropic"
+    from urllib.parse import urlparse
+    return urlparse(os.environ.get("BRANDGUARD_LLM_BASE_URL", "")).hostname or "the configured AI provider"
+
+
 def openai_max_tokens() -> int:
     try:
         return min(32000, max(256, int(os.environ.get("BRANDGUARD_LLM_MAX_TOKENS", 4000))))

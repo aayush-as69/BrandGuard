@@ -363,10 +363,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             demo_email="arjun@brewline.demo" if demo_available else "",
             demo_password=os.environ.get("BRANDGUARD_DEMO_PASSWORD", "") if demo_available else "",
             passcode_required=bool(not accounts and (passcode or admin_passcode)),
-            ai={"enabled": ai_on, "provider": "Anthropic", "log": llm.log_mode(), "retention_days": llm.retention_days(),
+            ai={"enabled": ai_on, "provider": llm.provider_name(), "log": llm.log_mode(), "retention_days": llm.retention_days(),
                 "redaction": llm.redact_enabled(),
                 "notice": ("When AI review is on, the text of your content and the few guideline rules that match it are "
-                           "sent to Anthropic's API to judge tone"
+                           f"sent to {llm.provider_name()} to judge tone"
                            + (", with email addresses, links, money amounts, phone numbers and @handles masked first" if llm.redact_enabled() else "")
                            + ". Nothing else is sent. You can switch it off for any "
                            f"review. A record of each request is kept for {llm.retention_days()} days "
