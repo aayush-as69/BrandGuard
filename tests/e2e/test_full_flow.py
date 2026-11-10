@@ -150,6 +150,11 @@ def test_try_demo_fills_the_sign_in_form_and_signs_in(tmp_path_factory, monkeypa
             pg.click("#signin button[type=submit]")
             pg.wait_for_selector("#acct:not(.hidden)")
             assert "manager" in pg.inner_text("#acct-name")
+            pg.select_option("#demo-role", "reviewer")                    # the role switch in the header
+            pg.wait_for_function("document.querySelector('#acct-name').textContent.includes('reviewer')") if False else None
+            pg.locator("#acct-name", has_text="reviewer").wait_for()
+            pg.select_option("#demo-role", "agency")
+            pg.locator("#acct-name", has_text="agency").wait_for()
             b.close()
     finally:
         srv.shutdown()

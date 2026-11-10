@@ -23,6 +23,10 @@ $('#who').onchange=e=>run(async()=>{
   }catch(err){e.target.value=prev;throw err}
   CUR=null;DETAIL=null;KBDATA=null;afterLogin()
 });
+$('#demo-role').onchange=e=>run(async()=>{
+  try{ME=await api('/api/demo/switch-role',{json:{role:e.target.value}})}
+  catch(err){accountUI();throw err}
+  ME=await api('/api/me');CUR=null;DETAIL=null;KBDATA=null;TAB='content';afterLogin()});
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));render()});
 function afterLogin(){
@@ -45,6 +49,9 @@ function accountUI(){
   $('#hdr-signin').classList.toggle('hidden',!(real&&!ME));$('#acct').classList.toggle('hidden',!(real&&ME));
   if(real&&ME)$('#acct-name').textContent=ME.name+' · '+ME.role+(ME.is_external?' (agency)':'');
   document.querySelector('#nav [data-tab=users]').classList.toggle('hidden',!(real&&ME&&ME.role==='admin'));
+  const demoUser=!!(real&&ME&&DEMO.available&&String(ME.email||'').endsWith('@brewline.demo'));
+  $('#demo-role').classList.toggle('hidden',!demoUser);$('#demo-role-l').classList.toggle('hidden',!demoUser);
+  if(demoUser)$('#demo-role').value=({rahul:'creator',arjun:'manager',meera:'reviewer',neha:'agency'})[ME.email.split('@')[0]]||'manager';
   $('#main').querySelectorAll('[data-tour-only]').forEach(x=>x.classList.toggle('hidden',real));
 }
 document.addEventListener('submit',e=>{
