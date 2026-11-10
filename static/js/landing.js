@@ -2,7 +2,7 @@
 function landing(note){
   const demo=AUTH!=='accounts';
   const cta=demo
-    ? '<button class="btn primary" data-c="tourStart">Take the 2-minute tour <span aria-hidden="true">↗</span></button><button class="btn landing-secondary" data-c="focusSignin">Choose a demo role</button>'
+    ? '<div class="demo-login"><div class="demo-login-head"><span class="demo-badge">DEMO WORKSPACE</span><span class="small muted">One sign-in · switch roles anytime</span></div><div class="demo-login-row"><input id="demo-pass" type="password" class="demo-pass" placeholder="Demo passcode" aria-label="Demo passcode"><button class="btn primary" data-c="demoLogin">Enter demo</button></div><p class="demo-role-note">Starts in <b>Manager</b>. Use the role switch in the top bar to explore Creator, Reviewer and Admin.</p></div>'
     : '<button class="btn primary" data-c="focusSignin">Sign in to BrandGuard <span aria-hidden="true">↗</span></button>';
   $('#main').innerHTML=`<div class="landing">
     ${note?`<p class="landing-notice" role="status">${esc(note)}</p>`:''}
@@ -73,7 +73,16 @@ function landing(note){
     <footer class="landing-footer"><span><img src="/static/brandguard-mark.svg" alt="" width="20" height="20"> BrandGuard</span><span>Brand integrity, made actionable.</span><span>BUILT FOR CLEARER DECISIONS</span></footer>
   </div>`;
 }
-function focusSignin(){if(AUTH==='accounts'){goLogin();return}const el=$('#who');if(el){el.scrollIntoView({block:'nearest',behavior:'smooth'});el.focus()}}
+async function demoLogin(){
+  if(AUTH==='accounts'){goLogin();return}
+  const pass=$('#demo-pass')?.value||'';
+  try{ME=await api('/api/login',{json:{user_id:2,passcode:pass}});CUR=null;DETAIL=null;KBDATA=null;afterLogin()}
+  catch(e){toast(e.message,true);$('#demo-pass')?.focus()}
+}
+function focusSignin(){
+  if(AUTH==='accounts'){goLogin();return}
+  const el=$('#demo-pass');if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.focus()}
+}
 
 /* Public screens in accounts mode: the front page at "/" and a separate sign-in page at "/login". */
 function showPublic(note){
