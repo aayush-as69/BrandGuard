@@ -13,7 +13,8 @@ services:
       - { key: BRANDGUARD_SECRET, generateValue: true }
       - { key: BRANDGUARD_ADMIN_EMAIL, sync: false }
       - { key: BRANDGUARD_ADMIN_PASSWORD, sync: false }
-      - { key: ANTHROPIC_API_KEY, sync: false }        # leave empty if you use the provider below
-      - { key: BRANDGUARD_LLM_BASE_URL, sync: false }  # e.g. https://api.your-provider.example/v1
+      # AI judge through BharatCode (OpenAI-compatible). Paste your key from https://bharatcode.ai/account in the dashboard.
+      - { key: BRANDGUARD_LLM_BASE_URL, value: "https://bharatcode.ai/api/model/v1" }
+      - { key: BRANDGUARD_MODEL, value: qwen-3.8-27b }
       - { key: BRANDGUARD_LLM_API_KEY, sync: false }
-      - { key: BRANDGUARD_MODEL, sync: false }
+      # To use Anthropic instead, remove the three lines above and set ANTHROPIC_API_KEY.
