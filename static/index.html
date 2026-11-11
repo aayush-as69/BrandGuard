@@ -60,7 +60,25 @@
   details summary{cursor:pointer;color:var(--mute)}
   .stack>*+*{margin-top:16px}
   .imgrow{display:grid;grid-template-columns:1.1fr 1.6fr .8fr .8fr auto;gap:6px;margin-bottom:6px}
-  code{background:#eef2ff;padding:1px 5px;border-radius:5px;font-size:12px}
+  code{background:#eef2ff;padding:1px 5px;border-radius:5px;font-size:12px;white-space:nowrap}
+  .grid>*,.grid2>*{min-width:0}
+  .grid2{display:grid;grid-template-columns:1fr 1.15fr;gap:20px;align-items:start}
+  .body{overflow-wrap:anywhere}
+  .claim{padding:8px 0;border-bottom:1px solid var(--line)}
+  .claim:last-of-type{border-bottom:0}
+  .claim .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .claim .tags span{font-size:12px;font-weight:600;white-space:nowrap}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  @media(max-width:700px){
+    header{flex-wrap:wrap;gap:8px 12px;padding:10px 14px}
+    header .tag,header label{display:none}
+    header .sp{display:none}
+    #who{margin-left:auto;max-width:60vw}
+    main{padding:14px}
+    .card{padding:12px}
+    .imgrow{grid-template-columns:1fr 1fr}
+    .imgrow button{grid-column:span 2}
+  }
 </style>
 </head>
 <body>
@@ -104,7 +122,13 @@ $('#who').onchange=e=>run(async()=>{
 });
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));render()});
-function afterLogin(){$('#nav').classList.remove('hidden');render()}
+function afterLogin(){
+  $('#nav').classList.remove('hidden');
+  // Agency users cannot browse brand material, so they get no Knowledge base tab.
+  document.querySelector('#nav [data-tab=kb]').classList.toggle('hidden',!!ME.is_external);
+  if(ME.is_external&&TAB==='kb')TAB='content';
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===TAB));
+  render()}
 function render(){TAB==='kb'?renderKB():renderContent()}
 
 /* ------------------------------------------------------------ content list + detail */
@@ -159,11 +183,12 @@ async function loadDetail(id){
        ${p.can_approve?`<button class="btn good" onclick="act('approve')">Approve</button>`:''}
        ${p.can_request_changes?`<button class="btn warn" onclick="reqChanges()">Request changes</button>`:''}
        ${p.can_rerun&&c.status!=='approved'?`<button class="btn" onclick="act('review')">Re-run review</button>`:''}</div></div>
-     <p class="small muted" style="margin:8px 0 0">${open?`${open} finding${open>1?'s':''} still need a decision.`:(d.findings.length?'Every finding has a decision.':'No findings.')}
-       Nothing is applied until a person clicks.</p>
+     <p class="small muted" style="margin:8px 0 0">${c.status==='approved'
+       ?`Approved${c.approved_by?' by '+esc(c.approved_by):''}. This version is locked.`
+       :`${open?`${open} finding${open>1?'s':''} still need a decision.`:(d.findings.length?'Every finding has a decision.':'No findings.')} Nothing is applied until a person clicks.`}</p>
      ${(meta.warnings||[]).map(w=>`<p class="small" style="color:var(--amber);margin:6px 0 0">⚠ ${esc(w)}</p>`).join('')}
      <p class="small muted" style="margin:6px 0 0">AI judge: ${esc(meta.llm_status||'not used')}${(meta.rejected||[]).length?` · ${(meta.rejected).length} unverifiable suggestion(s) discarded`:''}</p></div>
-   <div class="grid" style="grid-template-columns:1fr 1.15fr">
+   <div class="grid2">
      <div class="stack"><div class="card"><h3>Content</h3>
         <div class="body" id="body">${highlight(d)}</div>
         ${d.images.length?`<h3 style="margin-top:14px">Images</h3><table>${d.images.map(i=>`<tr><td><b>${esc(i.name)}</b></td>
@@ -172,8 +197,8 @@ async function loadDetail(id){
         ${p.can_revise?`<details style="margin-top:12px"><summary>Edit the text myself</summary>
           <textarea id="rb" rows="8" style="margin:8px 0">${esc(d.body)}</textarea>
           <button class="btn" onclick="revise()">Save as new version</button></details>`:''}</div>
-        <div class="card"><h3>Claim check</h3>${d.claims.length?`<table>${d.claims.map(x=>`<tr>
-          <td class="st-${x.status}">${label(x.status)}</td><td>${esc(x.text)}</td><td class="muted">${esc(x.source_id)}</td></tr>`).join('')}</table>`
+        <div class="card"><h3>Claim check</h3>${d.claims.length?groupClaims(d.claims).map(g=>`<div class="claim">
+          <div class="small">${esc(g.text)}</div><div class="tags">${g.tags.map(t=>`<span class="st-${t.status}">${label(t.status)}${t.source_id?' · '+esc(t.source_id):''}</span>`).join('')}</div></div>`).join('')
           :'<p class="small muted">No promotional claims detected.</p>'}
           <p class="small muted" style="margin:8px 0 0">Claims are matched to approved facts. “No approved source” is never filled in by guessing.</p></div>
         <div class="card"><h3>Discussion</h3>${d.comments.map(m=>`<div class="cmt"><b>${esc(m.author)}</b> <span class="chip">${m.role}</span>
@@ -186,6 +211,12 @@ async function loadDetail(id){
         ${d.history.length?`<details><summary>Resolved in earlier versions (${d.history.length})</summary>${d.history.map(h=>`<div class="small" style="padding:6px 0">
           <b>${esc(h.source_id)}</b> ${esc(h.span_text)} → <b>${esc(h.decision_text)}</b> <span class="muted">${h.decision} by ${esc(h.decided_by_name||'')}</span></div>`).join('')}</details>`:''}</div>
    </div></div>`;
+}
+function groupClaims(claims){ // one row per sentence, with every status found in it
+  const map=new Map();
+  for(const c of claims){ if(!map.has(c.text))map.set(c.text,{text:c.text,tags:[]});
+    const g=map.get(c.text); if(!g.tags.some(t=>t.status===c.status&&t.source_id===c.source_id))g.tags.push(c) }
+  return [...map.values()];
 }
 function highlight(d){
   const spans=d.findings.filter(f=>f.target==='body'&&f.span_start>=0&&f.decision==='open').sort((a,b)=>a.span_start-b.span_start);
