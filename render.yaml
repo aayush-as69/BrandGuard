@@ -16,5 +16,8 @@ services:
       # AI judge through BharatCode (OpenAI-compatible). Paste your key from https://bharatcode.ai/account in the dashboard.
       - { key: BRANDGUARD_LLM_BASE_URL, value: "https://bharatcode.ai/api/model/v1" }
       - { key: BRANDGUARD_MODEL, value: qwen-3.8-27b }
+      - { key: BRANDGUARD_LLM_REASONING, value: medium }
+      - { key: BRANDGUARD_LLM_MAX_TOKENS, value: "8000" }  # reasoning counts toward the output limit
+      - { key: BRANDGUARD_AI_TIMEOUT, value: "60" }          # medium reasoning is slower
       - { key: BRANDGUARD_LLM_API_KEY, sync: false }
       # To use Anthropic instead, remove the three lines above and set ANTHROPIC_API_KEY.
