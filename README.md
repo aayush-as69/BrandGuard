@@ -72,7 +72,8 @@ Brand reviews often depend on scattered documents, memory, and subjective feedba
 - Printable approval records with cited sources and audit history.
 - Guideline insights for managers, reviewers, and admins.
 - A public landing page and a separate sign-in page (`/login`) for real accounts.
-- A separate **Try demo** path can prefill the configured demo credentials; demo role switching happens inside the demo session without another email/password login.
+- A separate **Try demo** path can prefill the configured demo credentials; demo role switching happens inside the demo session, from the account menu, without another email/password login.
+- A compact header: signed in, one account menu holds Change password, Two-step sign-in, Sign out and (on demo accounts) the role switch. Password and two-step changes use in-page dialogs, not browser pop-ups.
 - Guided demo tour, keyboard support, responsive layouts, and contrast checks.
 - Health endpoint, structured logs, migrations, backup/restore tooling, Docker support, and CI checks.
 
