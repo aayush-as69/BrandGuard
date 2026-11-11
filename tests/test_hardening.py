@@ -1,4 +1,4 @@
-"""Regression tests for the code-review fixes."""
+"""Hardening: input limits, malformed requests, login, rate limits, concurrency and security headers."""
 import io
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ import pytest
 
 from brandguard import db, engine, kb, workflow as wf
 from brandguard.app import create_app
-from conftest import ARJUN, IRA, MEERA, NEHA, RAHUL
+from conftest import ARJUN, IRA, NEHA
 
 SEED = Path(__file__).resolve().parent.parent / "seed"
 
