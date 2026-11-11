@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt constraints.txt ./
 RUN pip install -r requirements.txt -c constraints.txt
 COPY . .
-RUN useradd -r -u 10001 app && mkdir /data && chown app /data
+RUN useradd -r -m -u 10001 app && mkdir /data && chown app /data
 USER app
 VOLUME /data
 EXPOSE 8000
