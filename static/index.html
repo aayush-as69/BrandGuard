@@ -236,10 +236,13 @@ function groupClaims(claims){ // one row per sentence, with every status found i
 }
 function highlight(d){
   const spans=d.findings.filter(f=>f.target==='body'&&f.span_start>=0&&f.decision==='open').sort((a,b)=>a.span_start-b.span_start);
+  // The server counts characters (code points); JavaScript strings count UTF-16 units, so an emoji
+  // would shift every highlight after it. Slice by code point instead.
+  const chars=Array.from(d.body),sl=(a,b)=>chars.slice(a,b).join('');
   let out='',pos=0;
   for(const f of spans){ if(f.span_start<pos)continue;
-    out+=esc(d.body.slice(pos,f.span_start))+`<mark class="${cls(f.severity)}" tabindex="0" role="button" onkeydown="if(event.key==='Enter')jump(${f.id})" onclick="jump(${f.id})" title="${esc(f.issue)}">${esc(d.body.slice(f.span_start,f.span_end))}</mark>`;pos=f.span_end}
-  return out+esc(d.body.slice(pos));
+    out+=esc(sl(pos,f.span_start))+`<mark class="${cls(f.severity)}" tabindex="0" role="button" onkeydown="if(event.key==='Enter')jump(${f.id})" onclick="jump(${f.id})" title="${esc(f.issue)}">${esc(sl(f.span_start,f.span_end))}</mark>`;pos=f.span_end}
+  return out+esc(sl(pos));
 }
 function jump(id){const el=document.getElementById('f'+id);if(!el)return;el.scrollIntoView({behavior:'smooth',block:'center'});
   el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1400)}
