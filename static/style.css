@@ -14,7 +14,7 @@
 }
 *{box-sizing:border-box}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-body{margin:0;font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
+body{margin:0;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
   background:radial-gradient(900px 500px at 8% -8%,#6d28d92e,transparent 60%),radial-gradient(800px 480px at 95% 0%,#2563eb26,transparent 60%),radial-gradient(900px 520px at 50% 118%,#be185d24,transparent 60%),var(--bg);background-attachment:fixed;
   -webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"cv11" 1}
 ::selection{background:#6d28d9;color:#fff}
@@ -51,7 +51,7 @@ main>.card+.card{margin-top:16px}
 .card{border:1px solid transparent;border-radius:14px;padding:18px;overflow-x:auto;
   background:linear-gradient(var(--card),var(--card)) padding-box,var(--g-soft) border-box;box-shadow:0 0 30px #7c3aed14}
 .card h2,.card h3{margin:0 0 10px;font-size:15px;font-weight:650;letter-spacing:-.005em}
-.muted{color:var(--mute)} .small{font-size:13px}
+.muted{color:var(--mute)} .small{font-size:14px}
 .btn{border:1px solid var(--edge);background:var(--raised);border-radius:9px;padding:7px 13px;cursor:pointer;color:var(--ink);
   transition:border-color .15s,background .15s}
 .btn:hover{border-color:#a78bfa;box-shadow:0 0 14px #8b5cf655} .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -91,11 +91,11 @@ mark.flash{outline:2px solid #c4b5fd}
 .finding.high{border-left-color:#ff5c8a} .finding.low{border-left-color:#60a5fa}
 .finding.done{opacity:.68;border-left-color:var(--green)}
 .finding.flash{box-shadow:0 0 0 2px #c4b5fd,0 0 22px #8b5cf6}
-.quote{border-left:3px solid #a78bfa;background:#140f2e;padding:7px 11px;margin:8px 0;font-size:13px;border-radius:0 8px 8px 0}
+.quote{border-left:3px solid #a78bfa;background:#140f2e;padding:9px 12px;margin:9px 0;font-size:14px;border-radius:0 8px 8px 0}
 .quote b{color:var(--accent)}
 .diff{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#07070f;border:1px solid var(--edge);border-radius:9px;padding:9px 11px;margin:8px 0}
 .diff del{background:#5b1236;color:#ffd0e0;text-decoration:line-through}.diff ins{background:#0c3b25;color:#bbf7d0;text-decoration:none}
-table{width:100%;border-collapse:collapse;font-size:13px} td,th{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{color:var(--mute);font-weight:600}
 .st-supported{color:var(--green);font-weight:600}.st-contradicted{color:var(--red);font-weight:600}.st-no_approved_source{color:var(--amber);font-weight:600}
 .cmt{border-bottom:1px solid var(--line);padding:9px 0}
@@ -342,19 +342,19 @@ main{max-width:1440px;padding:30px clamp(16px,3vw,42px) 56px}
 main>.stack{max-width:1320px;margin:0 auto}
 .card{border-radius:16px;padding:22px;background:linear-gradient(145deg,#10101c,#0c0c15) padding-box,var(--g-soft) border-box;box-shadow:0 14px 45px #0004}
 .card h2{font-size:18px;letter-spacing:-.025em}
-.card h3{font-size:15px}
+.card h3{font-size:17px}
 .card>p.muted{max-width:72ch}
 .grid{grid-template-columns:minmax(255px,300px) minmax(0,1fr);gap:24px}
 .grid>.stack>.card:first-child{position:sticky;top:88px}
 .item{padding:14px 15px;margin-bottom:9px;border-radius:12px}
-.item b{font-size:13.5px}
+.item b{font-size:15px}
 .item .chip{margin-top:5px}
 .grid2{grid-template-columns:minmax(0,1.08fr) minmax(320px,.92fr);gap:22px}
 #detail>.stack>.card:first-child{padding:20px 22px}
 #detail .grid2>.card,#detail .grid2 .stack>.card{background:linear-gradient(145deg,#11111e,#0d0d16) padding-box,var(--g-soft) border-box}
 .body{max-width:none;font-size:15.5px;line-height:1.8;padding:20px 22px}
 .finding{padding:15px;border-radius:13px}
-.finding p{max-width:78ch}
+.finding p{max-width:78ch;font-size:14px;line-height:1.7}
 table tr:hover td{background:#17152866}
 td,th{padding:10px 11px}
 .tiles{gap:12px}
@@ -392,23 +392,23 @@ td,th{padding:10px 11px}
 .demo-badge{font-size:9px;font-weight:800;letter-spacing:.14em;color:#c9b8ff}
 .demo-login-row{display:flex;gap:8px}
 .demo-pass{flex:1;min-width:0!important;width:auto!important;padding:11px 12px!important}
-.demo-role-note{margin:9px 0 0;color:#8f899d;font-size:10.5px}
+.demo-role-note{margin:9px 0 0;color:#8f899d;font-size:13px;line-height:1.6}
 .demo-role-note b{color:#c8b8f4}
 
 /* Shared screen headers and intentional empty states */
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin:0 auto 22px;max-width:1320px}
 .page-head h2{margin:6px 0 4px;font-size:28px;line-height:1.1;letter-spacing:-.035em}
-.page-head p{margin:0;color:var(--mute);max-width:700px}
-.section-kicker{margin-bottom:8px;color:#9485bf;font-size:9px;font-weight:800;letter-spacing:.15em}
+.page-head p{margin:0;color:var(--mute);max-width:700px;font-size:15px;line-height:1.7}
+.section-kicker{margin-bottom:8px;color:#9485bf;font-size:11px;font-weight:800;letter-spacing:.15em}
 .empty-state{text-align:center;padding:58px 30px!important;display:grid;justify-items:center;place-items:center;min-height:330px}
 .empty-state .empty-icon{width:44px;height:44px;display:grid;place-items:center;border:1px solid #65558c;border-radius:14px;color:#b9a4f4;background:#171329;box-shadow:0 0 30px #7c3aed22;margin-bottom:15px}
 .empty-state h3{margin:0 0 7px;font-size:18px}
-.empty-state p{max-width:520px;margin:0 0 18px}
+.empty-state p{max-width:520px;margin:0 0 18px;font-size:15px;line-height:1.7}
 .login-wrap{min-height:calc(100vh - 64px);display:grid;place-items:center;padding:40px 16px}
 .login-card{width:min(440px,100%);padding:34px;border:1px solid transparent;border-radius:18px;background:linear-gradient(145deg,#11101c,#0b0b13) padding-box,var(--g-soft) border-box;box-shadow:0 25px 80px #0008}
 .login-card h2{font-size:28px;letter-spacing:-.035em;margin:14px 0 6px}
 .login-card form{display:grid;gap:8px;margin-top:22px}
-.login-card form label{font-size:12px;color:var(--mute);margin-top:5px}
+.login-card form label{font-size:14px;color:var(--mute);margin-top:5px}
 .login-go{width:100%;margin-top:8px;padding:11px}
 .login-back{display:inline-block;margin-top:15px}
 @media(max-width:700px){.page-head{align-items:flex-start;flex-direction:column;gap:12px}.page-head h2{font-size:24px}}
