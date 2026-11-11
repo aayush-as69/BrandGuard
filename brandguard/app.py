@@ -18,6 +18,7 @@ from . import db as dbm
 from . import insights
 from . import imaging
 from . import record
+from . import throttle
 from . import totp
 from . import kb as kbm
 from . import llm
@@ -119,7 +120,6 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         SESSION_COOKIE_SECURE=production,
         PERMANENT_SESSION_LIFETIME=8 * 3600,  # sign-in lasts a working day at most
     )
-    failures: dict[str, list[float]] = {}  # wrong-passcode attempts per address
 
     boot = dbm.connect(app.config["DB_PATH"])
     try:
@@ -230,6 +230,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+        if production:
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         if request.path.startswith("/api/"):
             resp.headers["Cache-Control"] = "no-store"
         return resp
@@ -269,7 +271,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.errorhandler(sqlite3.IntegrityError)
     def _integrity(e):
-        return jsonify(error=f"Could not save: {e}"), 400
+        app.logger.warning("integrity error on %s %s: %s", request.method, request.path, e)  # detail stays on the server
+        if "users.email" in str(e) or "idx_users_email" in str(e):
+            return jsonify(error="That email address is already in use"), 400
+        return jsonify(error="That change conflicts with existing data and was not saved"), 400
 
     # -------------------------------------------------------------------- pages
     @app.get("/")
@@ -304,12 +309,6 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                 if ai_on else ""},
         )
 
-    def throttle(key: str) -> None:
-        now_ = time.time()
-        failures[key] = [t for t in failures.get(key, []) if now_ - t < 300]
-        if len(failures[key]) >= 10:
-            raise RateLimited("Too many failed attempts. Try again in a few minutes.")
-
     def start_session(row) -> None:
         session.clear()
         session.permanent = True
@@ -323,21 +322,18 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if accounts:
             email = str(data.get("email") or "").strip().lower()
             who = request.remote_addr or "?"
-            throttle(who)
-            throttle("email:" + email)
+            throttle.check(c, who, "email:" + email)
             row = c.execute("SELECT * FROM users WHERE lower(email)=? AND active=1", (email,)).fetchone() if email else None
             good = check_password_hash(row["password_hash"] if row and row["password_hash"] else _DUMMY_HASH,
                                        str(data.get("password") or ""))
             if not (row and row["password_hash"] and good):
-                failures.setdefault(who, []).append(time.time())
-                failures.setdefault("email:" + email, []).append(time.time())
+                throttle.record(c, who, "email:" + email)
                 raise AuthError("Wrong email or password")
             if row["totp_secret"]:
                 step = totp.verify(row["totp_secret"], str(data.get("code") or ""), row["totp_last"]) if data.get("code") else None
                 if step is None:
                     if data.get("code"):  # a wrong code counts like a wrong password
-                        failures.setdefault(who, []).append(time.time())
-                        failures.setdefault("email:" + email, []).append(time.time())
+                        throttle.record(c, who, "email:" + email)
                     return jsonify(error="Enter the 6-digit code from your authenticator app", mfa_required=True), 401
                 c.execute("UPDATE users SET totp_last=? WHERE id=?", (step, row["id"]))
             c.execute("UPDATE users SET last_login=? WHERE id=?", (dbm.now(), row["id"]))
@@ -349,10 +345,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             expected = admin_passcode if row["role"] == "admin" else passcode
             if expected:
                 who = request.remote_addr or "?"
-                throttle(who)
+                throttle.check(c, who)
                 given = str(data.get("passcode") or "")
                 if not hmac.compare_digest(given.encode(), expected.encode()):
-                    failures.setdefault(who, []).append(time.time())
+                    throttle.record(c, who)
                     raise Forbidden("Wrong passcode")
         start_session(row)
         return jsonify({k: row[k] for k in ("id", "name", "role", "is_external")})

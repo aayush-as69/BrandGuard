@@ -15,7 +15,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 | Text review, rules first | `brandguard/engine.py` |
 | Cited findings: span, rule or fact, source quote, severity, confidence | `brandguard/models.py` (`Finding`), `engine.verify` |
 | Claim check: supported / contradicted / no approved source | `engine.review` (prices, dates, rankings, superlatives, descriptive facts) |
-| Suggested fixes shown as a diff; accept, edit or dismiss | `workflow.decide`, `static/app.js` |
+| Suggested fixes shown as a diff; accept, edit or dismiss | `workflow.decide`, `static/js/content.js` |
 | Review workflow: roles, comments, approval, versions, audit log | `brandguard/workflow.py` |
 | Image and accessibility check (Should) | alt text length and WCAG contrast in `engine.py` |
 | Grounded AI judge for tone and messaging | `brandguard/llm.py` (optional, needs an API key; `scripts/check_live_ai.py` tests it end to end) |
@@ -30,7 +30,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # ~170 tests (browser tests skip if Chromium is missing)
+python -m pytest -q                      # ~190 tests (browser tests skip if Chromium is missing)
 ```
 
 ### Configuration (environment variables)
@@ -49,7 +49,7 @@ Everything is listed, with comments, in [`.env.example`](.env.example). The ones
 | `BRANDGUARD_SSO_EMAIL_HEADER`, `BRANDGUARD_SSO_SECRET` | Sign-in through an identity-aware proxy (see docs/DEPLOYMENT.md). |
 | `BRANDGUARD_LOG_JSON=1` | One JSON log line per request (never any content). `GET /healthz` is the health check. |
 
-Deployment, backup/restore, migrations and the production checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Deployment, monitoring, backup/restore, migrations and the production checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Test guide, smoke test, manual phone/keyboard checklists and the restore drill: [docs/TESTING.md](docs/TESTING.md).
 Data retention and what is sent to the AI: [docs/PRIVACY.md](docs/PRIVACY.md). Security model: [docs/SECURITY.md](docs/SECURITY.md).
 A `Dockerfile`, `render.yaml`, GitHub Actions CI (tests, browser tests, `pip-audit`) and dependabot config are included.
 
@@ -65,11 +65,11 @@ The content is sent to the AI service only when it is first reviewed, when its a
 ```
 brandguard/   engine.py (the checks)  workflow.py (roles, versions, approval)  kb.py (import, edit)  llm.py (AI judge)
               insights.py  record.py  retrieve.py  models.py  db.py  errors.py  app.py (HTTP API)
-static/       index.html (markup)  style.css  app.js   - plain HTML/CSS/JS, no build step
+static/       index.html (markup)  style.css  js/ (core, auth, users, tour, insights, content, kb, main) - plain HTML/CSS/JS, no build step
 seed/         synthetic Brewline Coffee guidelines, facts, glossary, assets, settings, demo email
 scripts/      check_live_ai.py - end-to-end test of the real AI judge (needs a key and network)
 docs/         deployment, privacy and security notes
-tests/        ~170 tests: engine, workflow, accounts, access control, migrations, AI privacy, multi-process, UI, browser (e2e/)
+tests/        ~190 tests: engine, workflow, accounts, access control, migrations, AI privacy, multi-process, UI, browser (e2e/)
 ```
 
 ## Architecture and main decisions

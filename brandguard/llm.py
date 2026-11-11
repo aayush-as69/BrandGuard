@@ -114,6 +114,22 @@ _MASKS = [
 ]
 
 
+class PrivacyBlock(Exception):
+    """The content must not be sent to the AI provider at all."""
+
+
+def _extra_patterns(var: str) -> list[tuple[str, "re.Pattern"]]:
+    """Organisation-defined patterns from an environment variable holding a JSON object {"LABEL": "regex"}."""
+    raw = os.environ.get(var, "").strip()
+    if not raw:
+        return []
+    try:
+        spec = json.loads(raw)
+        return [(str(label).upper(), re.compile(rx)) for label, rx in spec.items()]
+    except (ValueError, AttributeError, re.error) as exc:
+        raise PrivacyBlock(f"{var} is not valid ({exc})")
+
+
 def redact_enabled() -> bool:
     return os.environ.get("BRANDGUARD_AI_REDACT", "on").lower() != "off"
 
@@ -124,7 +140,7 @@ def redact(text: str) -> tuple[str, dict[str, str]]:
     mapping: dict[str, str] = {}
     counts: dict[str, int] = {}
 
-    for kind, rx in _MASKS:
+    for kind, rx in _MASKS + _extra_patterns("BRANDGUARD_AI_MASK_PATTERNS"):
         def sub(m, kind=kind):
             counts[kind] = counts.get(kind, 0) + 1
             token = f"[[{kind}_{counts[kind]}]]"
@@ -191,7 +207,13 @@ def make_judge(
         if not codes:
             return [], "skipped: no relevant guideline rules retrieved"
         rules_text = "\n".join(f"{c}: {kb.rules[c]['text']}" for c in codes)
-        sent, mapping = redact(body) if redact_enabled() else (body, {})
+        try:
+            for label, rx in _extra_patterns("BRANDGUARD_AI_BLOCK_PATTERNS"):
+                if rx.search(body):
+                    raise PrivacyBlock(f"content matches the organisation's '{label}' pattern")
+            sent, mapping = redact(body) if redact_enabled() else (body, {})
+        except PrivacyBlock as why:  # fail closed: when in doubt nothing leaves the server
+            return [], f"skipped: not sent to the AI ({why})"
         user = f"BRAND RULES\n{rules_text}\n\n<content>\n{sent}\n</content>"
         purge_log(conn)
         log_id = conn.execute(

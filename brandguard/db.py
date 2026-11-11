@@ -202,11 +202,17 @@ def _m5_mfa(conn: sqlite3.Connection) -> None:
         conn.execute(f"ALTER TABLE users ADD COLUMN {col}")
 
 
+def _m6_login_failures(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE login_failures(key TEXT NOT NULL, at REAL NOT NULL)")
+    conn.execute("CREATE INDEX idx_login_failures_key ON login_failures(key, at)")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
     (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
+    (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
 ]
 
 
