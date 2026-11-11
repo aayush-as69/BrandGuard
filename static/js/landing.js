@@ -3,7 +3,7 @@ function landing(note){
   const demo=AUTH!=='accounts';
   const cta=demo
     ? '<div class="demo-login"><div class="demo-login-head"><span class="demo-badge">DEMO WORKSPACE</span><span class="small muted">One sign-in · switch roles anytime</span></div><div class="demo-login-row"><input id="demo-pass" type="password" class="demo-pass" placeholder="Demo passcode" aria-label="Demo passcode"><button class="btn primary" data-c="demoLogin">Enter demo</button></div><p class="demo-role-note">Starts in <b>Manager</b>. Use the role switch in the top bar to explore Creator, Reviewer and Admin.</p></div>'
-    : '<button class="btn primary" data-c="focusSignin">Sign in to BrandGuard <span aria-hidden="true">↗</span></button>';
+    : '<div class="landing-auth-actions"><button class="btn primary" data-c="demoFill">Try demo</button><button class="landing-secondary btn" data-c="goLogin">Sign in</button></div>';
   $('#main').innerHTML=`<div class="landing">
     ${note?`<p class="landing-notice" role="status">${esc(note)}</p>`:''}
     <section class="landing-hero" aria-labelledby="landing-title">
@@ -83,6 +83,13 @@ function focusSignin(){
   if(AUTH==='accounts'){goLogin();return}
   const el=$('#demo-pass');if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.focus()}
 }
+function demoFill(){
+  if(!DEMO.available){toast('Demo login is not configured.',true);return}
+  history.pushState({},'','/login');loginView();
+  $('#email').value=DEMO.email;
+  $('#password').value=DEMO.password;
+  $('#email').focus();
+}
 
 /* Public screens in accounts mode: the front page at "/" and a separate sign-in page at "/login". */
 function showPublic(note){
@@ -111,5 +118,9 @@ function loginView(note){
     </form>
     <p class="small"><a href="/" data-c="goHome" class="login-back">Back to the home page</a></p>
   </section></div>`;
+  if(DEMO.available){
+    const formNote='<button type="button" class="btn demo-fill" data-c="demoFill">Use demo account</button>';
+    $('#signin').insertAdjacentHTML('beforebegin',formNote);
+  }
   $('#email').focus()}
 window.addEventListener('popstate',()=>{if(!ME&&AUTH==='accounts')showPublic()});
