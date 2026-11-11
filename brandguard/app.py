@@ -356,8 +356,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.get("/api/config")
     def config():
         ai_on = llm.ai_available(app.config["LLM_CALL"])
+        demo_available = bool(accounts and os.environ.get("BRANDGUARD_SEED_DEMO") == "1" and os.environ.get("BRANDGUARD_DEMO_PASSWORD"))
         return jsonify(
             auth=auth_mode, sso=bool(sso_secret),
+            demo_available=demo_available,
+            demo_email="arjun@brewline.demo" if demo_available else "",
+            demo_password=os.environ.get("BRANDGUARD_DEMO_PASSWORD", "") if demo_available else "",
             passcode_required=bool(not accounts and (passcode or admin_passcode)),
             ai={"enabled": ai_on, "provider": "Anthropic", "log": llm.log_mode(), "retention_days": llm.retention_days(),
                 "redaction": llm.redact_enabled(),
