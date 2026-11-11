@@ -76,8 +76,11 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     )
     failures: dict[str, list[float]] = {}  # wrong-passcode attempts per address
 
-    with dbm.connect(app.config["DB_PATH"]) as boot:
+    boot = dbm.connect(app.config["DB_PATH"])
+    try:
         dbm.init(boot)
+    finally:
+        boot.close()
 
     # ----------------------------------------------------------------- plumbing
     def conn() -> sqlite3.Connection:
@@ -237,7 +240,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         raw_name = upload.filename if upload else "pasted.txt"
         if upload:
             data = upload.read()
-            text = kbm.extract_text(raw_name, data) if kind == "guidelines" else data.decode("utf-8", "replace")
+            text = kbm.extract_text(raw_name, data) if kind == "guidelines" else data.decode("utf-8-sig", "replace")
+        text = text.lstrip("\ufeff")  # Windows editors add an invisible byte-order mark
         if not text.strip():
             raise ValueError("Provide a file or paste text")
         level = request.form.get("access_level", "internal")

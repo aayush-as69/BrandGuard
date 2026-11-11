@@ -25,7 +25,7 @@ All demo data is synthetic (fictional brand: Brewline Coffee). No confidential m
 ```bash
 pip install -r requirements-dev.txt      # runtime + pytest
 python run.py                            # http://127.0.0.1:5000  (open demo mode, no passcode)
-python -m pytest -q                      # 53 tests
+python -m pytest -q                      # 67 tests
 ```
 
 ### Configuration (environment variables)
@@ -70,8 +70,8 @@ Content → Parse → Rules + retrieval → LLM judge → Verify → Findings st
 
 ## Testing
 
-`python -m pytest -q` runs 53 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
-Writing these tests found and fixed several real bugs (a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, and "a affordable" after a word swap).
+`python -m pytest -q` runs 67 tests, including: all seeded traps detected with citations; clean content produces no findings; fabricated AI quotes, rules and spans are rejected; an AI outage does not break the review; applying fixes makes no further AI calls; the full creator → manager → reviewer approval flow; role and access restrictions; passcode login and rate limiting; stale concurrent writes refused; input limits and malformed requests return clear 400s; real server bugs return 500 (not a disguised 404); and the UI's own colours meet the 4.5:1 contrast rule it enforces on others.
+Writing these tests found and fixed several real bugs (a price span that swallowed a comma, "medium-dark roast" flagged as contradicting itself, "#10" flagged as a "#1" claim, "ADRs 300" read as a price, "No. 1" and "Rs. 399" split across sentences, "a affordable" after a word swap, a 50,000-character post producing an ~800 MB response, and a dismissal silently covering a later identical word).
 
 **Not yet tested:** the live LLM call against the real API (tests use a fake backend), PDF import with real-world scanned PDFs, concurrent users, and user testing with real teams.
 
@@ -82,6 +82,10 @@ Writing these tests found and fixed several real bugs (a price span that swallow
 - Timestamps are stored in UTC and shown in the viewer's local time.
 - Sentence and claim detection are rule-based and English-only; unusual phrasing can be missed.
 - Rule-based fixes are minimal word swaps; stronger, intent-preserving rewrites are a Round 3 improvement.
+- At most 300 findings are shown per review; if there are more, the rest is flagged and the content cannot be submitted until the visible ones are fixed and the review is run again.
+- Amounts that are not tied to a known product ("free delivery above ₹999") are raised as low-confidence questions for a reviewer, not as errors. Negated claims ("not a light roast") are ignored; dates are compared only when they sit near the fact's own words.
+- A dismissal carries to a later version only for the same wording in the same sentence.
+- Finding quotes show the text of the fact they cite, so external agency users can see confidential fact statements (such as the approved price) through their own findings, even though they cannot browse the knowledge base. Redacting these is a Round 3 option.
 - Claim extraction covers prices (₹/Rs/INR), dates, rankings, common superlatives and keyword facts, not every possible claim.
 - Images are described by name, alt text and colours entered by the user; vision-based reading of uploaded images is not built yet.
 - Not a substitute for legal advice.

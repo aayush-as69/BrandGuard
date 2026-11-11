@@ -301,7 +301,7 @@ async function renderKB(){
    <div class="card"><h2>Glossary</h2><table>${k.glossary.map(g=>`<tr><td>${esc(g.kind)}</td><td>${esc(g.term)} → <b>${esc(g.preferred)}</b></td><td><code>${esc(g.rule_code)}</code></td></tr>`).join('')}</table></div>
    <div class="card"><h2>Reusable assets</h2><table>${k.assets.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.kind)}</td><td class="muted">${esc(a.note)}</td></tr>`).join('')}</table></div></div>`;
 }
-const seed=()=>run(async()=>{const r=await api('/api/kb/seed',{json:{}});toast('Demo knowledge base loaded: '+r.guidelines.rules+' rules, '+r.facts+' facts.');renderKB()});
+const seed=()=>run(async()=>{if(!confirm('This replaces the current knowledge base (guidelines, facts, glossary, assets and check settings) with the demo one. Existing content and its findings are kept. Continue?'))return;const r=await api('/api/kb/seed',{json:{}});toast('Demo knowledge base loaded: '+r.guidelines.rules+' rules, '+r.facts+' facts.');renderKB()});
 const doImport=()=>run(async()=>{
   const fd=new FormData();fd.append('kind',$('#ik').value);fd.append('access_level',$('#il').value);fd.append('text',$('#itext').value);
   const f=$('#ifile').files[0];if(f)fd.append('file',f);
