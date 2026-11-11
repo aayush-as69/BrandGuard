@@ -10,7 +10,7 @@ async function api(path,opt={}){
   if(o.json!==undefined){o.method=o.method||'POST';o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(o.json);delete o.json}
   const r=await fetch(path,o); const t=await r.text(); let d={}; try{d=JSON.parse(t)}catch(e){}
   if(r.status===401&&path!=='/api/login'&&path!=='/api/me'){signedOut('Your session ended. Pick a user to sign in again.')}
-  if(!r.ok) throw new Error(d.error||('Request failed ('+r.status+')'));
+  if(!r.ok){const err=new Error(d.error||('Request failed ('+r.status+')'));err.data=d;throw err}
   return d;
 }
 function signedOut(msg){ME=null;CUR=null;DETAIL=null;$('#nav').classList.add('hidden');$('#who').value='';accountUI();
@@ -19,11 +19,15 @@ function toast(msg,err){const t=$('#toast');t.setAttribute('role',err?'alert':'s
 async function run(fn){try{await fn()}catch(e){toast(e.message,true)}}
 
 async function boot(){
-  try{const cfg=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
+  let cfg2={};
+  try{const cfg=cfg2=await api('/api/config');AUTH=cfg.auth||'demo';AICFG=cfg.ai||AICFG;$('#pass').classList.toggle('hidden',!cfg.passcode_required)}catch(e){}
   if(AUTH==='accounts'){
     document.querySelectorAll('.tour-only').forEach(x=>x.classList.add('hidden'));
     $('#main').innerHTML='<div class="card"><h2>Welcome to BrandGuard</h2><p class="muted">Sign in with your work email to continue.</p></div>';
-    try{ME=await api('/api/me');afterLogin()}catch(e){accountUI()}
+    try{ME=await api('/api/me');afterLogin()}
+    catch(e){
+      if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});afterLogin();return}catch(e2){}}
+      accountUI()}
     return}
   USERS=await api('/api/users');
   $('#who').innerHTML='<option value="">Choose…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.name)} · ${u.role}${u.is_external?' (agency)':''}</option>`).join('');
@@ -60,9 +64,17 @@ function accountUI(){
   $('#main').querySelectorAll('[data-tour-only]').forEach(x=>x.classList.toggle('hidden',real));
 }
 $('#signin').onsubmit=e=>{e.preventDefault();run(async()=>{
-  ME=await api('/api/login',{json:{email:$('#email').value,password:$('#password').value}});
-  $('#password').value='';CUR=null;DETAIL=null;KBDATA=null;afterLogin()})};
+  try{ME=await api('/api/login',{json:{email:$('#email').value,password:$('#password').value,code:$('#code').value}})}
+  catch(err){if(err.data&&err.data.mfa_required){$('#code').classList.remove('hidden');$('#code').focus()}throw err}
+  $('#password').value='';$('#code').value='';$('#code').classList.add('hidden');CUR=null;DETAIL=null;KBDATA=null;afterLogin()})};
 $('#signout').onclick=()=>run(async()=>{await api('/api/logout',{json:{}});signedOut('Signed out.')});
+$('#mfa').onclick=()=>run(async()=>{
+  if(ME.mfa){const pw=prompt('To turn two-step sign-in off, enter your password');if(pw===null)return;
+    const code=prompt('and a current 6-digit code');if(code===null)return;
+    await api('/api/mfa/disable',{json:{password:pw,code}});ME.mfa=false;toast('Two-step sign-in is off.');return}
+  const s=await api('/api/mfa/setup',{json:{}});
+  const code=prompt('Add this key to your authenticator app (Google Authenticator, Authy, 1Password...):\n\n'+s.secret+'\n\nThen enter the 6-digit code it shows');
+  if(code===null)return;await api('/api/mfa/enable',{json:{code}});ME.mfa=true;toast('Two-step sign-in is on.')});
 $('#chpw').onclick=()=>run(async()=>{
   const cur=prompt('Current password');if(cur===null)return;
   const nw=prompt('New password (at least 10 characters)');if(nw===null)return;
@@ -169,7 +181,14 @@ function imgRow(i={}){return `<div class="imgrow">
   <input type="text" placeholder="alt text" aria-label="Image alt text" value="${esc(i.alt||'')}" data-k="alt">
   <input type="text" placeholder="text colour #RRGGBB" aria-label="Text colour on the image" value="${esc(i.text_color||'')}" data-k="text_color">
   <input type="text" placeholder="background #RRGGBB" aria-label="Background colour behind the text" value="${esc(i.bg_color||'')}" data-k="bg_color">
+  <label class="small muted">Read colours from a file <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-img="1" aria-label="Choose an image file to read its colours"></label>
   <button class="btn" type="button" aria-label="Remove this image" data-c="removeRow">×</button></div>`}
+document.addEventListener('change',e=>{const t=e.target;if(!t.dataset||!t.dataset.img||!t.files[0])return;
+  run(async()=>{const fd=new FormData();fd.append('image',t.files[0]);
+    const r=await api('/api/image/analyze',{method:'POST',body:fd});const row=t.closest('.imgrow');
+    const set=(k,v)=>{const i=row.querySelector(`[data-k=${k}]`);if(i&&v)i.value=v};
+    if(!row.querySelector('[data-k=name]').value)set('name',t.files[0].name);
+    set('bg_color',r.bg_color);set('text_color',r.text_color);toast(`${r.width}×${r.height}px. ${r.note}`)})});
 function readImgs(){return [...document.querySelectorAll('#imgs .imgrow')].map(r=>{const o={};r.querySelectorAll('input').forEach(i=>o[i.dataset.k]=i.value);return o}).filter(o=>o.name)}
 function showNew(){
   CUR=null;DETAIL=null;
@@ -192,6 +211,11 @@ async function loadDetail(id,rid){
   const fresh=await api('/api/content/'+id);
   if(rid!==undefined&&rid!==RID)return;
   DETAIL=fresh;
+  // The AI tone check can finish after the rule findings: look again every 2 s (at most a minute) until it does.
+  clearTimeout(loadDetail.t);
+  if(String((fresh.review_meta||{}).llm_status||'').startsWith('pending')&&(loadDetail.n=(loadDetail.n||0)+1)<=30)
+    loadDetail.t=setTimeout(()=>{if(CUR===id)loadDetail(id).catch(()=>{})},2000);
+  else loadDetail.n=0;
   const d=DETAIL,c=d.content,p=d.permissions,open=d.findings.filter(f=>f.decision==='open').length;
   const meta=d.review_meta||{};
   $('#detail').innerHTML=`<div class="stack">

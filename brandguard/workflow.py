@@ -14,7 +14,9 @@ Human-control rules enforced here (not just in the UI):
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
+import types
 import re
 from typing import Callable, Optional
 
@@ -206,25 +208,30 @@ def _inherited_ai_findings(conn, content_id: int, ver: int, body: str) -> list[F
     return out
 
 
+def _insert_finding(conn, content_id: int, ver: int, f, dismissals: _Dismissals) -> int:
+    """Store one finding (a matching earlier dismissal carries over). Returns 1 if one was carried over."""
+    old = dismissals.earlier(f, ver)
+    decision = ("dismissed", f"(carried over) {old['decision_reason']}", old["decided_by"], old["decided_at"]) \
+        if old else ("open", "", None, None)
+    conn.execute(
+        """INSERT INTO findings(content_id, version, category, issue, span_text, span_start, span_end, target,
+             source_type, source_id, source_quote, severity, confidence, suggested_fix, fix_note,
+             ai_generated, needs_reviewer, decision, decision_reason, decided_by, decided_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (content_id, ver, f.category, f.issue, f.span_text, f.span_start, f.span_end, f.target,
+         f.source_type, f.source_id, f.source_quote, f.severity, f.confidence, f.suggested_fix, f.fix_note,
+         int(f.ai_generated), int(f.needs_reviewer), *decision),
+    )
+    return 1 if old else 0
+
+
 def _store_review(conn, content_id: int, ver: int, result, dismissals: _Dismissals) -> int:
     """Replace this version's findings and claims with `result`. Returns how many dismissals were carried over."""
     conn.execute("DELETE FROM findings WHERE content_id=? AND version=?", (content_id, ver))
     conn.execute("DELETE FROM claims WHERE content_id=? AND version=?", (content_id, ver))
     carried = 0
     for f in result.findings:
-        old = dismissals.earlier(f, ver)
-        decision = ("dismissed", f"(carried over) {old['decision_reason']}", old["decided_by"], old["decided_at"]) \
-            if old else ("open", "", None, None)
-        carried += 1 if old else 0
-        conn.execute(
-            """INSERT INTO findings(content_id, version, category, issue, span_text, span_start, span_end, target,
-                 source_type, source_id, source_quote, severity, confidence, suggested_fix, fix_note,
-                 ai_generated, needs_reviewer, decision, decision_reason, decided_by, decided_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (content_id, ver, f.category, f.issue, f.span_text, f.span_start, f.span_end, f.target,
-             f.source_type, f.source_id, f.source_quote, f.severity, f.confidence, f.suggested_fix, f.fix_note,
-             int(f.ai_generated), int(f.needs_reviewer), *decision),
-        )
+        carried += _insert_finding(conn, content_id, ver, f, dismissals)
     for cl in result.claims:
         conn.execute(
             "INSERT INTO claims(content_id, version, text, status, source_id) VALUES (?,?,?,?,?)",
@@ -246,7 +253,12 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
 
     inherited = _inherited_ai_findings(conn, content_id, ver, v["body"]) if ai == "inherit" else []
     judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
-    result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
+    schedule = getattr(judge_factory, "schedule", None) if judge else None
+    if schedule:  # rules now, AI afterwards: the author is not kept waiting for the provider
+        result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=None, inherited=inherited)
+        result.llm_status = PENDING
+    else:
+        result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
     if ai == "off":
         result.llm_status = "skipped: AI review was switched off for this review (the text was not sent anywhere)"
     elif ai == "inherit" and not inherited:
@@ -257,12 +269,86 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     carried = _store_review(conn, content_id, ver, result, dismissals)
     meta = {"warnings": result.warnings, "rejected": result.rejected, "llm_status": result.llm_status,
             "truncated": result.truncated}
+    if schedule:
+        meta["pending_since"] = now()
     conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
                  (json.dumps(meta), content_id, ver))
     audit(conn, content_id, None, "review_run",
           f"v{ver}: {len(result.findings)} findings, {carried} carried over; AI judge: {result.llm_status}")
     conn.commit()
+    if schedule:
+        schedule(content_id, ver)
     return {"findings": len(result.findings), "carried_over": carried, **meta}
+
+
+PENDING = "pending: the AI tone check is still running; the rule-based findings below are complete"
+
+
+def complete_ai_review(conn, content_id: int, ver: int, judge_factory: Callable) -> None:
+    """Background half of a review: ask the AI judge and add what survives verification to this version.
+    Does nothing if the content has moved on to a newer version in the meantime."""
+    def finish(status: str, rejected=(), added=0) -> None:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = version_row(conn, content_id, ver)
+            meta = json.loads(row["review_meta"] or "{}")
+            if not str(meta.get("llm_status", "")).startswith("pending"):
+                conn.execute("ROLLBACK")
+                return
+            meta["llm_status"] = status
+            meta["rejected"] = list(meta.get("rejected", [])) + list(rejected)
+            conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
+                         (json.dumps(meta), content_id, ver))
+            audit(conn, content_id, None, "ai_review_done", f"v{ver}: {added} AI suggestion(s); {status}")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
+    if c["current_version"] != ver:
+        return
+    v = version_row(conn, content_id, ver)
+    body, images = v["body"], json.loads(v["images"])
+    try:
+        judge = judge_factory(conn, content_id, ver)
+        if judge is None:
+            return finish("not used")
+        existing = [types.SimpleNamespace(span_start=r["span_start"], span_end=r["span_end"], target=r["target"])
+                    for r in conn.execute("SELECT span_start, span_end, target FROM findings WHERE content_id=? AND version=?",
+                                          (content_id, ver))]
+        accepted, rejected, status = engine.ai_pass(engine.load_kb(conn), body, images, existing, judge)
+        dismissals = _Dismissals(conn, content_id)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if conn.execute("SELECT current_version FROM content WHERE id=?", (content_id,)).fetchone()[0] != ver:
+                conn.execute("ROLLBACK")
+                return
+            for f in accepted:
+                _insert_finding(conn, content_id, ver, f, dismissals)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        finish(status, rejected, len(accepted))
+    except Exception as exc:  # never leave a review "pending" forever
+        finish(f"failed: {type(exc).__name__}: {exc}"[:200])
+
+
+def settle_interrupted_reviews(conn) -> int:
+    """At start-up: an AI check that was running when the server stopped will never finish; say so."""
+    n = 0
+    for r in conn.execute("SELECT content_id, version, review_meta FROM versions WHERE review_meta LIKE '%pending%'").fetchall():
+        meta = json.loads(r["review_meta"] or "{}")
+        started = meta.get("pending_since") or ""
+        stale = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=120)).isoformat(timespec="seconds")
+        if str(meta.get("llm_status", "")).startswith("pending") and started < stale:  # another worker may be mid-job
+            meta["llm_status"] = "interrupted: the AI tone check did not finish (server restarted); run the review again"
+            conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
+                         (json.dumps(meta), r["content_id"], r["version"]))
+            n += 1
+    conn.commit()
+    return n
 
 
 # --------------------------------------------------------------------- content
@@ -446,6 +532,8 @@ def submit(conn, user: dict, content_id: int) -> None:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_submit"]:
         raise Forbidden("Only the author can submit, and only a draft or content with changes requested")
+    if str(current(conn, c)["review_meta"].get("llm_status", "")).startswith("pending"):
+        raise ValueError("The AI tone check is still running. Wait a few seconds, then submit.")
     hidden = current(conn, c)["review_meta"].get("truncated", 0)
     if hidden:
         raise ValueError(f"{hidden} more findings are not shown yet. Fix the ones you can see and run the review again before submitting.")
