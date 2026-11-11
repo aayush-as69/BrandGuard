@@ -73,6 +73,31 @@ def clearance(user: dict) -> int:
     return ACCESS_LEVELS["internal"] if user["role"] == "creator" else ACCESS_LEVELS["confidential"]
 
 
+def visible_facts(conn, user: dict) -> set[str]:
+    """Codes of the approved facts this person may see. Agency users see public facts only."""
+    level = 0 if user["is_external"] else clearance(user)
+    return {r["code"] for r in conn.execute("SELECT code, access_level FROM facts")
+            if ACCESS_LEVELS[r["access_level"]] <= level}
+
+
+def is_restricted(f: dict, visible: set[str]) -> bool:
+    return f.get("source_type") == "fact" and f.get("source_id") not in visible
+
+
+def redact(f: dict) -> dict:
+    """What a person without clearance sees of a finding that rests on a restricted fact: that something
+    conflicts, and where, but not the fact, the approved value or a fix that would reveal it."""
+    f = dict(f)
+    f.update(
+        restricted=True,
+        issue="This conflicts with an approved fact that only the brand team can see.",
+        source_quote="Restricted: this fact is not visible to your account.",
+        suggested_fix=None, decision_text=None,
+        fix_note="Ask the brand team for the approved wording, or rewrite this part yourself.",
+    )
+    return f
+
+
 def get_content(conn, user: dict, content_id: int) -> dict:
     row = conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone()
     if not row:
@@ -311,6 +336,8 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         return {"decision": "dismissed", "new_version": None}
 
     if action == "accept":
+        if is_restricted(f, visible_facts(conn, user)):
+            raise Forbidden("This fix comes from a restricted fact. Ask the brand team, or use Edit to write your own wording.")
         replacement = f["suggested_fix"]
         if not replacement:
             raise ValueError("This finding has no suggested fix. Use edit to write one, or dismiss it.")
