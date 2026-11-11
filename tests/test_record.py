@@ -42,3 +42,11 @@ def test_record_follows_the_same_access_rules(seeded, login):
     assert login(NEHA).get(f"/api/content/9999/record").status_code == 404
     anon = seeded.test_client()
     assert anon.get(f"/api/content/{cid}/record").status_code in (401, 403)
+
+
+def test_record_page_has_no_inline_script(seeded, login):
+    import re
+    cid = _approved(login)
+    html = login(MEERA).get(f"/api/content/{cid}/record").get_data(as_text=True)
+    assert not re.search(r"\son[a-z]+\s*=", html) and "<script src=\"/static/print.js\">" in html
+    assert "window.print" not in html

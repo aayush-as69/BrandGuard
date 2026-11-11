@@ -78,3 +78,14 @@ def test_page_assets_are_linked_and_served(app):
         r = c.get(url)
         assert r.status_code == 200 and kind in r.content_type, (url, r.content_type)
     assert "<style" not in page and "<script>" not in page   # no inline code left in the markup
+
+
+def test_no_inline_script_and_strict_csp(app):
+    import re
+    assert not re.search(r"\son[a-z]+\s*=\s*[\"']", HTML), "inline event handler found"
+    assert "javascript:" not in HTML
+    csp = app.test_client().get("/").headers["Content-Security-Policy"]
+    script_src = [d for d in csp.split(";") if d.strip().startswith("script-src")][0]
+    assert "'unsafe-inline'" not in script_src and "'unsafe-eval'" not in script_src
+    assert "object-src 'none'" in csp and "frame-ancestors 'none'" in csp
+

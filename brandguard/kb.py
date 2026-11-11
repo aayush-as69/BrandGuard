@@ -209,6 +209,7 @@ def seed_demo(conn: sqlite3.Connection, seed_dir: Path) -> dict:
     out["guidelines"] = import_guidelines(
         conn, "Brewline Coffee Brand Guidelines (synthetic)",
         (seed_dir / "guidelines.md").read_text(encoding="utf-8"),
+        access_level="public",  # agencies are given the brand guidelines; confidential rules are added separately
     )
     out["facts"] = import_facts(conn, json.loads((seed_dir / "facts.json").read_text(encoding="utf-8")))
     out["glossary"] = import_glossary(conn, json.loads((seed_dir / "glossary.json").read_text(encoding="utf-8")))

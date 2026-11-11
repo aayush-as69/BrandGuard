@@ -53,7 +53,7 @@ pre{{white-space:pre-wrap;background:#f8fafc;border:1px solid #cbd5e1;border-rad
 button{{font:inherit;padding:6px 12px}}@media print{{button{{display:none}}}}</style></head><body>
 <p class="m">BrandGuard approval record. Synthetic demo data. Generated {e(_when(dt.datetime.now(dt.timezone.utc).isoformat()))} for {e(viewer)}.</p>
 <h1>{e(c['title'])}</h1><p class="m">Author: {e(c['author'])}. Version {c['current_version']}.</p>
-<div class="banner">{banner}</div><button onclick="window.print()">Print or save as PDF</button>
+<div class="banner">{banner}</div><button id="print">Print or save as PDF</button><script src="/static/print.js"></script>
 <h2>Final text</h2><pre>{e(d['body'])}</pre>{('<h2>Images</h2><ul>' + images + '</ul>') if images else ''}
 <h2>Findings ({len(done)} of {len(findings)} decided)</h2>
 {('<table><tr><th>Type</th><th>Issue</th><th>Source (approved guideline or fact)</th><th>Decision</th></tr>' + rows + '</table>') if rows else '<p>No findings in this version.</p>'}

@@ -235,7 +235,7 @@ def test_passcode_login_and_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setenv("BRANDGUARD_ADMIN_PASSCODE", "admin-only")
     app = create_app(str(tmp_path / "p.db"))
     c = app.test_client()
-    assert c.get("/api/config").get_json() == {"passcode_required": True}
+    assert c.get("/api/config").get_json()["passcode_required"] is True
     assert c.post("/api/login", json={"user_id": NEHA}).status_code == 403
     assert c.get("/api/me").status_code == 401  # a failed login does not sign anyone in
     assert c.post("/api/login", json={"user_id": NEHA, "passcode": "open-sesame"}).status_code == 200
@@ -248,14 +248,19 @@ def test_passcode_login_and_rate_limit(tmp_path, monkeypatch):
 
 
 def test_open_demo_mode_has_no_passcode(app):
-    assert app.test_client().get("/api/config").get_json() == {"passcode_required": False}
+    assert app.test_client().get("/api/config").get_json()["passcode_required"] is False
 
 
 def test_production_refuses_to_start_unprotected(tmp_path, monkeypatch):
     monkeypatch.setenv("BRANDGUARD_ENV", "production")
-    with pytest.raises(RuntimeError, match="BRANDGUARD_PASSCODE"):
+    with pytest.raises(RuntimeError, match="BRANDGUARD_SECRET"):
         create_app(str(tmp_path / "x.db"))
     monkeypatch.setenv("BRANDGUARD_SECRET", "s" * 20)
+    with pytest.raises(RuntimeError, match="BRANDGUARD_ADMIN_EMAIL"):  # real accounts, but nobody can sign in yet
+        create_app(str(tmp_path / "x.db"))
+    monkeypatch.setenv("BRANDGUARD_AUTH", "demo")
+    with pytest.raises(RuntimeError, match="BRANDGUARD_PASSCODE"):  # demo mode must be explicit and passcode-protected
+        create_app(str(tmp_path / "x.db"))
     monkeypatch.setenv("BRANDGUARD_PASSCODE", "pw")
     app = create_app(str(tmp_path / "x.db"))
     assert app.config["SESSION_COOKIE_SECURE"] is True

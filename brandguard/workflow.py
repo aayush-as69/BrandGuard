@@ -73,25 +73,36 @@ def clearance(user: dict) -> int:
     return ACCESS_LEVELS["internal"] if user["role"] == "creator" else ACCESS_LEVELS["confidential"]
 
 
-def visible_facts(conn, user: dict) -> set[str]:
-    """Codes of the approved facts this person may see. Agency users see public facts only."""
+def source_key(source_type: str, source_id: str) -> str:
+    return f"{'fact' if source_type == 'fact' else 'rule'}:{source_id}"
+
+
+def visible_sources(conn, user: dict) -> set[str]:
+    """The approved facts and guideline rules this person may see, as "fact:F-01" / "rule:G-01" keys.
+    Agency users see public material only; internal creators public and internal; others everything.
+    A source that no longer exists is not visible to anyone, which is the safe default."""
     level = 0 if user["is_external"] else clearance(user)
-    return {r["code"] for r in conn.execute("SELECT code, access_level FROM facts")
+    seen = {source_key("fact", r["code"]) for r in conn.execute("SELECT code, access_level FROM facts")
             if ACCESS_LEVELS[r["access_level"]] <= level}
+    seen |= {source_key("guideline", r["code"]) for r in conn.execute(
+        "SELECT r.code, g.access_level FROM rules r JOIN guidelines g ON g.id = r.guideline_id")
+        if ACCESS_LEVELS[r["access_level"]] <= level}
+    return seen
 
 
 def is_restricted(f: dict, visible: set[str]) -> bool:
-    return f.get("source_type") == "fact" and f.get("source_id") not in visible
+    return source_key(f.get("source_type", ""), f.get("source_id", "")) not in visible
 
 
 def redact(f: dict) -> dict:
-    """What a person without clearance sees of a finding that rests on a restricted fact: that something
-    conflicts, and where, but not the fact, the approved value or a fix that would reveal it."""
+    """What a person without clearance sees of a finding that rests on a restricted fact or guideline: that
+    something conflicts, and where, but not the source, the approved value or a fix that would reveal it."""
+    what = "approved fact" if f.get("source_type") == "fact" else "guideline"
     f = dict(f)
     f.update(
         restricted=True,
-        issue="This conflicts with an approved fact that only the brand team can see.",
-        source_quote="Restricted: this fact is not visible to your account.",
+        issue=f"This conflicts with an {what} that only the brand team can see.",
+        source_quote=f"Restricted: this {what} is not visible to your account.",
         suggested_fix=None, decision_text=None,
         fix_note="Ask the brand team for the approved wording, or rewrite this part yourself.",
     )
@@ -226,7 +237,8 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     """(Re)review the current version. Dismissals made earlier on the same issue carry over.
 
     ai="fresh": ask the AI judge (it sees the content).  ai="inherit": do NOT contact the AI;
-    suggestions it made on the previous version are re-located in the new text and kept."""
+    suggestions it made on the previous version are re-located in the new text and kept.
+    ai="off": the author chose not to send the text to the AI service; rules only."""
     c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
     v = current(conn, c)
     ver = c["current_version"]
@@ -235,7 +247,9 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     inherited = _inherited_ai_findings(conn, content_id, ver, v["body"]) if ai == "inherit" else []
     judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
     result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
-    if ai == "inherit" and not inherited:
+    if ai == "off":
+        result.llm_status = "skipped: AI review was switched off for this review (the text was not sent anywhere)"
+    elif ai == "inherit" and not inherited:
         before = json.loads(version_row(conn, content_id, ver - 1)["review_meta"]).get("llm_status", "") if ver > 1 else ""
         result.llm_status = ("not re-run for this change (content was not re-sent)"
                              if before.startswith(("used", "not re-run")) else "not used")
@@ -253,7 +267,7 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
 
 # --------------------------------------------------------------------- content
 def create_content(conn, user: dict, title: str, body: str, images: list[dict],
-                   judge_factory: Optional[Callable] = None) -> int:
+                   judge_factory: Optional[Callable] = None, ai: str = "fresh") -> int:
     title = _text(title, "Title", MAX_TITLE, required=True).strip()
     body = _text(body, "Content text", MAX_BODY, required=True)
     images = _clean_images(images)
@@ -265,7 +279,7 @@ def create_content(conn, user: dict, title: str, body: str, images: list[dict],
         (cid, 1, body, json.dumps(images), user["id"], "Created", now()))
     audit(conn, cid, user["id"], "content_created", title)
     conn.commit()
-    run_review(conn, cid, judge_factory)
+    run_review(conn, cid, judge_factory, ai)
     return cid
 
 
@@ -314,12 +328,12 @@ def _new_version(conn, c: dict, user_id: int, body: str, images: list[dict], not
 
 
 def revise(conn, user: dict, content_id: int, body: str, images: list[dict],
-           judge_factory: Optional[Callable] = None) -> int:
+           judge_factory: Optional[Callable] = None, ai: str = "fresh") -> int:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_revise"]:
         raise Forbidden("Only the author can edit, and only while the content is a draft or has changes requested")
     body = _text(body, "Content text", MAX_BODY, required=True)
-    return _new_version(conn, c, user["id"], body, _clean_images(images), "Edited by author", judge_factory)
+    return _new_version(conn, c, user["id"], body, _clean_images(images), "Edited by author", judge_factory, ai)
 
 
 # -------------------------------------------------------------------- decisions
@@ -387,8 +401,8 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         return _dismiss(conn, user, c, f, perms, reason)
 
     if action == "accept":
-        if is_restricted(f, visible_facts(conn, user)):
-            raise Forbidden("This fix comes from a restricted fact. Ask the brand team, or use Edit to write your own wording.")
+        if is_restricted(f, visible_sources(conn, user)):
+            raise Forbidden("This fix comes from a restricted source. Ask the brand team, or use Edit to write your own wording.")
         replacement = f["suggested_fix"]
         if not replacement:
             raise ValueError("This finding has no suggested fix. Use edit to write one, or dismiss it.")
@@ -417,6 +431,11 @@ def comment(conn, user: dict, content_id: int, body: str, finding_id: Optional[i
     body = _text(body, "Comment", MAX_COMMENT).strip()
     if not body:
         raise ValueError("Comment is empty")
+    if finding_id is not None:
+        if isinstance(finding_id, bool) or not isinstance(finding_id, int):
+            raise ValueError("finding_id must be a number")
+        if not conn.execute("SELECT 1 FROM findings WHERE id=? AND content_id=?", (finding_id, c["id"])).fetchone():
+            raise ValueError("That finding does not belong to this content")
     conn.execute("INSERT INTO comments(content_id, finding_id, user_id, body, created_at) VALUES (?,?,?,?,?)",
                  (c["id"], finding_id, user["id"], body, now()))
     audit(conn, c["id"], user["id"], "comment", body[:120])
@@ -470,7 +489,7 @@ def request_changes(conn, user: dict, content_id: int, note: str) -> None:
     conn.commit()
 
 
-def list_content(conn, user: dict) -> list[dict]:
+def list_content(conn, user: dict, limit: int = 50, offset: int = 0) -> list[dict]:
     where, args = ("", ())
     if user["role"] == "creator":
         where, args = ("WHERE c.author_id=?", (user["id"],))
@@ -479,5 +498,11 @@ def list_content(conn, user: dict) -> list[dict]:
               (SELECT COUNT(*) FROM findings f WHERE f.content_id=c.id AND f.version=c.current_version
                   AND f.decision='open') AS open_findings,
               (SELECT COUNT(*) FROM findings f WHERE f.content_id=c.id AND f.version=c.current_version) AS total_findings
-            FROM content c JOIN users u ON u.id=c.author_id {where} ORDER BY c.id DESC""", args)
+            FROM content c JOIN users u ON u.id=c.author_id {where} ORDER BY c.id DESC LIMIT ? OFFSET ?""", (*args, limit, offset))
     return [dict(r) for r in rows]
+
+
+def count_content(conn, user: dict) -> int:
+    if user["role"] == "creator":
+        return conn.execute("SELECT COUNT(*) FROM content WHERE author_id=?", (user["id"],)).fetchone()[0]
+    return conn.execute("SELECT COUNT(*) FROM content").fetchone()[0]
