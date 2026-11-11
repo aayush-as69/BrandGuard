@@ -12,7 +12,7 @@ Use this folder as the technical reference for operating and validating BrandGua
 ## Before using real brand data
 
 1. Read the deployment guide and configure production mode with a long random secret.
-2. Use real accounts; do not expose demo sign-in on a production deployment.
+2. Use real accounts; do not expose demo sign-in on a production deployment. Demo deployments can expose the **Try demo** shortcut only when `BRANDGUARD_SEED_DEMO=1` and `BRANDGUARD_DEMO_PASSWORD` are intentionally configured.
 3. Review the security and privacy boundaries with the brand owner.
 4. Decide whether sending content to an AI provider is permitted. The AI judge is optional and can be disabled.
 5. Use encrypted storage and protected backups. The application does not encrypt the live SQLite database itself.
