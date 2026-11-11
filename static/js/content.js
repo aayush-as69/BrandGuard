@@ -14,7 +14,7 @@ async function renderContent(){
         <span class="chip ${cls(c.status)}">${label(c.status)}</span>
         ${c.open_findings?`<span class="chip high">${c.open_findings} open</span>`:`<span class="chip approved">${c.total_findings?'all decided':'clean'}</span>`}
       </div>`).join(''):'<p class="muted small">Nothing yet. Choose New to submit a draft for review.</p>'}${list.length>=LISTN?'<p><button class="btn small" data-c="moreContent">Show more</button></p>':''}</div></div></div>
-    <div id="detail">${CUR?'':'<div class="card muted">Select content, or create new content to see findings with cited sources.</div>'}</div></div>`;
+    <div id="detail">${CUR?'':'<div class="card empty-state"><div class="empty-icon">✦</div><h3>Select a draft to review</h3><p class="muted">Choose an item on the left, or start a new review. BrandGuard will show the finding, source, suggested fix and decision trail together.</p><button class="btn primary" data-c="showNew">Start a review</button></div>'}</div></div>`;
   if(CUR) await loadDetail(CUR,rid);
 }
 async function openContent(id){CUR=id;await renderContent()}
