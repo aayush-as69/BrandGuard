@@ -1,7 +1,7 @@
 /* Users screen (admin) */
 async function renderUsers(){
   const rid=++RID;const list=await api('/api/users');if(rid!==RID)return;
-  $('#main').innerHTML='<div class="card"><h2>Users</h2><p class="small muted">Accounts for your team and agencies. Deactivating an account or changing its password signs that person out at once.</p>'+
+  $('#main').innerHTML='<div class="page-head"><div><div class="eyebrow">ACCESS CONTROL</div><h2>Users</h2><p>Manage the people who can create, review, approve and administer brand work.</p></div><span class="chip approved">Admin only</span></div><div class="card"><div class="section-kicker">TEAM DIRECTORY</div><h2>Accounts</h2><p class="small muted">Deactivating an account or changing its password signs that person out at once.</p>'+
    '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>'+
    list.map(u=>`<tr><td>${esc(u.name)}${u.is_external?' <span class="small muted">(agency)</span>':''}</td><td>${esc(u.email||'')}</td><td>${esc(u.role)}</td><td>${u.active?'Active':'Deactivated'}</td>`+
     `<td><button class="btn" data-uact="toggle" data-uid="${u.id}" data-on="${u.active?1:0}">${u.active?'Deactivate':'Reactivate'}</button> `+
