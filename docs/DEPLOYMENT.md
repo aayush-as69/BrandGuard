@@ -1,4 +1,12 @@
-# Deploying BrandGuard
+<div align="right"><img src="../assets/brandguard-mark.svg" width="34" alt="BrandGuard"></div>
+
+> Configure a safe deployment, keep the service observable, and rehearse recovery before relying on real brand content.
+
+[Documentation index](README.md) · [Deployment](DEPLOYMENT.md) · [Testing](TESTING.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+
+---
+
+# Deployment guide
 
 BrandGuard is one Flask process plus a SQLite file. That is deliberate: it is easy to run, back up and reason about.
 For a team of tens of people it is enough. For many concurrent writers or several servers, move to Postgres (see "Limits").
