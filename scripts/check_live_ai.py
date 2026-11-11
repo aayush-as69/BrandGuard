@@ -1,4 +1,4 @@
-"""Check the real AI judge end to end. Needs network access and ANTHROPIC_API_KEY.
+"""Check the real AI judge end to end. Needs network access and a key (ANTHROPIC_API_KEY, or BRANDGUARD_LLM_BASE_URL + BRANDGUARD_LLM_API_KEY + BRANDGUARD_MODEL).
 
     export ANTHROPIC_API_KEY=sk-ant-...
     python scripts/check_live_ai.py
@@ -22,8 +22,9 @@ TEXT = ("Hi there,\n\nListen up: our coffee will absolutely blow every other bra
 
 
 def main() -> int:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Set ANTHROPIC_API_KEY first."); return 2
+    from brandguard import llm
+    if not llm.ai_available():
+        print("Set ANTHROPIC_API_KEY, or BRANDGUARD_LLM_BASE_URL + BRANDGUARD_LLM_API_KEY + BRANDGUARD_MODEL, first."); return 2
     path = tempfile.mktemp(suffix=".db")
     conn = dbm.connect(path); dbm.init(conn)
     kbm.seed_demo(conn, Path(__file__).resolve().parent.parent / "seed")

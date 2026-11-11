@@ -43,7 +43,7 @@ Everything is listed, with comments, in [`.env.example`](.env.example). The ones
 | `BRANDGUARD_AUTH` | `accounts` (default in production: email + password, admin manages users) or `demo` (demo identities; in production it also needs `BRANDGUARD_PASSCODE`). |
 | `BRANDGUARD_ADMIN_EMAIL` / `_PASSWORD` | First start only: creates the first admin in accounts mode. |
 | `BRANDGUARD_DB` | SQLite file path (default `brandguard.db`). Migrations run automatically at start. |
-| `ANTHROPIC_API_KEY`, `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off`, `BRANDGUARD_AI_TIMEOUT` | Optional AI judge. |
+| `ANTHROPIC_API_KEY` or (`BRANDGUARD_LLM_BASE_URL` + `BRANDGUARD_LLM_API_KEY` + `BRANDGUARD_MODEL`), `BRANDGUARD_MODEL`, `BRANDGUARD_LLM=off`, `BRANDGUARD_AI_TIMEOUT` | Optional AI judge. |
 | `BRANDGUARD_AI_LOG`, `BRANDGUARD_AI_RETENTION_DAYS` | AI request log: metadata only by default, deleted after 30 days. |
 | `BRANDGUARD_AI_REDACT`, `BRANDGUARD_AI_ASYNC` | Mask emails/links/amounts/phones before the AI sees text (default on); run the AI check in the background (default on with a real provider). |
 | `BRANDGUARD_SSO_EMAIL_HEADER`, `BRANDGUARD_SSO_SECRET` | Sign-in through an identity-aware proxy (see docs/DEPLOYMENT.md). |
@@ -57,7 +57,7 @@ Demo walkthrough: sign in as **Ira (admin)** → Knowledge base → *Load Brewli
 Sign in as **Neha (agency creator)** → New → *Load demo email* → *Review now*.
 Fix findings, *Submit for approval*, then sign in as **Arjun (manager)** or **Meera (reviewer)** to approve.
 
-Optional AI judge: `export ANTHROPIC_API_KEY=...` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
+Optional AI judge: `export ANTHROPIC_API_KEY=...`, or for any OpenAI-compatible provider set `BRANDGUARD_LLM_BASE_URL` (https), `BRANDGUARD_LLM_API_KEY` and `BRANDGUARD_MODEL` (model via `BRANDGUARD_MODEL`, default `claude-sonnet-5-5`; `BRANDGUARD_LLM=off` disables it).
 The content is sent to the AI service only when it is first reviewed, when its author edits it, or when someone presses *Re-run review*. Accepting a fix does not re-send it; earlier AI suggestions are carried over and re-located in the new text.
 
 ## Code layout

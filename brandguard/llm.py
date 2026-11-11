@@ -55,32 +55,55 @@ def ai_timeout() -> float:
         return 20.0
 
 
+def provider() -> str:
+    """"openai" when BRANDGUARD_LLM_BASE_URL is set (any OpenAI-compatible chat endpoint), otherwise "anthropic"."""
+    return "openai" if os.environ.get("BRANDGUARD_LLM_BASE_URL", "").strip() else "anthropic"
+
+
+def _chat_url() -> str:
+    base = os.environ["BRANDGUARD_LLM_BASE_URL"].strip().rstrip("/")
+    if not (base.startswith("https://") or base.startswith("http://localhost") or base.startswith("http://127.0.0.1")):
+        raise ValueError("BRANDGUARD_LLM_BASE_URL must start with https://")
+    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+
 def default_call(system: str, user: str, model: str) -> str:
-    """Call the Anthropic Messages API within a total deadline. Raises on any failure."""
+    """Call the configured AI provider within a total deadline. Raises on any failure.
+    Anthropic Messages API by default; an OpenAI-compatible /chat/completions endpoint when
+    BRANDGUARD_LLM_BASE_URL is set (key in BRANDGUARD_LLM_API_KEY)."""
     import requests
 
-    key = os.environ["ANTHROPIC_API_KEY"]
+    if provider() == "openai":
+        url = _chat_url()
+        headers = {"authorization": "Bearer " + os.environ["BRANDGUARD_LLM_API_KEY"], "content-type": "application/json"}
+        body = {"model": model, "max_tokens": 1500,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    else:
+        url = API_URL
+        headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01",
+                   "content-type": "application/json"}
+        body = {"model": model, "max_tokens": 1500, "system": system, "messages": [{"role": "user", "content": user}]}
     deadline = time.monotonic() + ai_timeout()
     r = None
     for attempt in range(2):  # one retry for rate limits and server hiccups, if the deadline allows
         left = deadline - time.monotonic()
         if left <= 0.5:
             raise TimeoutError("AI deadline reached")
-        r = requests.post(
-            API_URL,
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": model, "max_tokens": 1500, "system": system,
-                  "messages": [{"role": "user", "content": user}]},
-            timeout=(5, left),
-        )
+        r = requests.post(url, headers=headers, json=body, timeout=(5, left))
         if r.status_code in (429, 500, 502, 503, 529) and attempt == 0:
-            wait = min(float(r.headers.get("retry-after", 2) or 2), 5)
+            try:
+                wait = min(float(r.headers.get("retry-after", 2) or 2), 5)
+            except ValueError:
+                wait = 2.0
             if time.monotonic() + wait < deadline - 2:
                 time.sleep(wait)
                 continue
         break
     r.raise_for_status()
-    return "".join(b.get("text", "") for b in r.json().get("content", []))
+    data = r.json()
+    if provider() == "openai":
+        return (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
+    return "".join(b.get("text", "") for b in data.get("content", []))
 
 
 def _parse(text: str) -> list[dict]:
@@ -181,7 +204,11 @@ def ai_available(call=None) -> bool:
     """Is an AI backend configured? (A test can inject `call`.)"""
     if call is not None:
         return True
-    return bool(os.environ.get("ANTHROPIC_API_KEY")) and os.environ.get("BRANDGUARD_LLM", "on") != "off"
+    if os.environ.get("BRANDGUARD_LLM", "on") == "off":
+        return False
+    if provider() == "openai":  # needs a key and an explicit model name: the default is an Anthropic model
+        return bool(os.environ.get("BRANDGUARD_LLM_API_KEY")) and bool(os.environ.get("BRANDGUARD_MODEL"))
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def make_judge(
