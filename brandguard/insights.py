@@ -31,8 +31,8 @@ def compute(conn: sqlite3.Connection) -> dict:
 
     titles = {r["code"]: r["title"] for r in conn.execute("SELECT code, title FROM rules")}
     titles.update({r["code"]: r["statement"] for r in conn.execute("SELECT code, statement FROM facts")})
-    quotes = {r["source_id"]: r["source_quote"] for r in conn.execute(
-        "SELECT source_id, source_quote FROM findings GROUP BY source_id")}
+    quotes = {r["source_id"]: r["source_quote"] for r in conn.execute(  # the most recent quote for each source
+        "SELECT source_id, source_quote FROM findings WHERE id IN (SELECT MAX(id) FROM findings GROUP BY source_id)")}
 
     rules = []
     for code in sorted(set(flagged) | set(decided)):
@@ -48,16 +48,15 @@ def compute(conn: sqlite3.Connection) -> dict:
         })
     rules.sort(key=lambda r: (-r["flagged"], r["code"]))
 
-    # Time from "submitted" to "approved", per piece of content.
-    hours = []
-    for c in conn.execute("SELECT DISTINCT content_id FROM audit WHERE action='approved'"):
-        rows = conn.execute(
-            "SELECT action, created_at FROM audit WHERE content_id=? AND action IN ('submitted','approved') "
-            "ORDER BY id", (c["content_id"],)).fetchall()
-        sub = next((r["created_at"] for r in reversed(rows) if r["action"] == "submitted"), None)
-        app_ = next((r["created_at"] for r in reversed(rows) if r["action"] == "approved"), None)
-        if sub and app_:
-            hours.append(max(0.0, _hours(sub, app_)))
+    # Time from "submitted" to the "approved" that followed it. One pass over the audit trail, per piece of content, so a
+    # piece that was approved, revised and sent again pairs each approval with its own submission.
+    hours, waiting = [], {}
+    for r in conn.execute("SELECT content_id, action, created_at FROM audit "
+                          "WHERE action IN ('submitted','approved') AND content_id IS NOT NULL ORDER BY id"):
+        if r["action"] == "submitted":
+            waiting[r["content_id"]] = r["created_at"]
+        elif r["content_id"] in waiting:
+            hours.append(max(0.0, _hours(waiting.pop(r["content_id"]), r["created_at"])))
 
     ai = {r["decision"]: r["n"] for r in conn.execute(
         "SELECT decision, COUNT(*) n FROM findings WHERE ai_generated=1 AND decision_reason NOT LIKE '(carried over)%' "
