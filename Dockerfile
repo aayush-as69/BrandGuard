@@ -11,4 +11,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('PORT','8000'))"
 # One worker per CPU is fine: SQLite uses a file lock and the app keeps no state in memory except rate limits.
 # Hosts such as Render tell us the port in $PORT; default 8000.
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 60 run:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-2} --timeout 60 run:app"]
