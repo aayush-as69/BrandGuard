@@ -21,6 +21,7 @@ from . import imaging
 from . import record
 from . import throttle
 from . import totp
+from . import vault
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -177,6 +178,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     elif production:
         app.logger.warning("BRANDGUARD_TRUSTED_PROXIES is not set: behind a proxy every visitor shares one address, "
                            "so the sign-in throttle would count them together. Set it to the number of proxies in front.")
+    def seal(v: str) -> str:
+        return vault.seal(v, app.secret_key)
+
+    def unseal(v):
+        return vault.unseal(v, app.secret_key)
+
     app.ai_futures = []
     if ai_async:
         pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-review")
@@ -241,7 +248,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
         resp.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
             "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
         if production:
             resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -343,7 +350,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
                 throttle.record(c, who, "email:" + email)
                 raise AuthError("Wrong email or password")
             if row["totp_secret"]:
-                step = totp.verify(row["totp_secret"], str(data.get("code") or ""), row["totp_last"]) if data.get("code") else None
+                key = unseal(row["totp_secret"])
+                step = totp.verify(key, str(data.get("code") or ""), row["totp_last"]) if (data.get("code") and key) else None
                 if step is None:
                     if data.get("code"):  # a wrong code counts like a wrong password
                         throttle.record(c, who, "email:" + email)
@@ -413,7 +421,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def mfa_setup():
         user = me()
         secret = totp.new_secret()
-        conn().execute("UPDATE users SET totp_pending=? WHERE id=?", (secret, user["id"]))
+        conn().execute("UPDATE users SET totp_pending=? WHERE id=?", (seal(secret), user["id"]))
         conn().commit()
         return jsonify(secret=secret, uri=totp.uri(secret, user.get("email") or user["name"]))
 
@@ -421,7 +429,8 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def mfa_enable():
         user, data, c = me(), payload(), conn()
         row = c.execute("SELECT totp_pending FROM users WHERE id=?", (user["id"],)).fetchone()
-        step = totp.verify(row["totp_pending"], str(data.get("code") or "")) if row["totp_pending"] else None
+        pending = unseal(row["totp_pending"])
+        step = totp.verify(pending, str(data.get("code") or "")) if pending else None
         if step is None:
             raise ValueError("That code is not right. Check the time on your phone and try the next code.")
         c.execute("UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_last=?, session_epoch=session_epoch+1 WHERE id=?",
@@ -437,7 +446,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if not row["totp_secret"]:
             raise ValueError("Two-step sign-in is not on")
         if not check_password_hash(row["password_hash"] or _DUMMY_HASH, str(data.get("password") or "")) \
-                or totp.verify(row["totp_secret"], str(data.get("code") or ""), row["totp_last"]) is None:
+                or totp.verify(unseal(row["totp_secret"]) or "", str(data.get("code") or ""), row["totp_last"]) is None:
             raise Forbidden("Password or code is wrong")
         c.execute("UPDATE users SET totp_secret=NULL, totp_pending=NULL, session_epoch=session_epoch+1 WHERE id=?", (user["id"],))
         c.commit()

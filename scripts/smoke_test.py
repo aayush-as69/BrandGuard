@@ -3,7 +3,7 @@
     python scripts/smoke_test.py https://brandguard.example.com [--email you@x.in --password ...]
 
 Checks: health endpoint, HTTPS and HSTS, security headers, no inline-script CSP, cross-site writes refused,
-anonymous requests refused, and (if credentials are given) sign-in, a review and sign-out. Exit code 0 = all passed.
+anonymous requests refused, and a real sign-in and sign-out (credentials are required unless --public-only). Exit code 0 = all passed.
 """
 import argparse
 import json
@@ -40,7 +40,10 @@ def main():
     ap.add_argument("--email")
     ap.add_argument("--password")
     ap.add_argument("--code", help="current authenticator code, if two-step sign-in is on")
+    ap.add_argument("--public-only", action="store_true", help="skip the signed-in checks (not recommended: they catch proxy problems)")
     a = ap.parse_args()
+    if not a.public_only and not (a.email and a.password):
+        ap.error("give --email and --password so a real sign-in is tested, or pass --public-only to skip it")
     base = a.base.rstrip("/")
     secure = base.startswith("https://")
     check("served over HTTPS", secure, "use the https:// address; production cookies are Secure")
@@ -64,7 +67,7 @@ def main():
     s, _, _ = call(base, "/api/users")
     check("account list not public", s in (401, 403), f"status {s}")
 
-    if a.email and a.password:
+    if not a.public_only:
         body = {"email": a.email, "password": a.password}
         if a.code:
             body["code"] = a.code

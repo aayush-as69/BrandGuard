@@ -135,3 +135,12 @@ input[type=file]{color:var(--mute);font-size:13px}
 input[type=file]::file-selector-button{font:inherit;background:var(--raised);color:var(--ink);border:1px solid var(--edge);border-radius:8px;
   padding:6px 11px;margin-right:10px;cursor:pointer}
 input[type=file]::file-selector-button:hover{border-color:#a78bfa}
+
+/* Layout helpers (replace inline styles so the CSP can refuse inline CSS) */
+#pass,#password{width:130px;flex:none}#who{width:auto}#email{width:170px;flex:none}#code{width:110px;flex:none}
+.u-blk-m8{display:block;margin-top:8px}.u-between{justify-content:space-between}.u-m0{margin:0}.u-mt12{margin-top:12px}
+.u-title{margin:0;font-size:18px}.u-plain{text-decoration:none;color:inherit}.u-m8-0-0{margin:8px 0 0}
+.u-warn-m6{color:var(--amber);margin:6px 0 0}.u-m6-0-0{margin:6px 0 0}.u-mt14{margin-top:14px}.u-my8{margin:8px 0}
+.u-mt10{margin-top:10px}.u-py6{padding:6px 0}.u-m8-0-4{margin:8px 0 4px}.u-mt8{margin-top:8px}.u-flex1{flex:1}
+.u-cursor-default{cursor:default}.u-wauto{width:auto}.u-w35{width:35%}
+.swatch{padding:1px 8px;border-radius:4px}
