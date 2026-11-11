@@ -155,13 +155,14 @@ def now() -> str:
 
 
 def connect(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def init(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         conn.executemany(

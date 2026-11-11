@@ -5,22 +5,56 @@ Human-control rules enforced here (not just in the UI):
   * Dismissals need a written reason.
   * Dismissing a fact or claim finding needs a manager or reviewer.
   * Approval needs every finding decided, a manager or reviewer (not the author),
-    and a reviewer specifically if any claim was dismissed or any finding is low confidence.
+    and a reviewer specifically if any fact, claim or low-confidence finding was dismissed.
+  * The AI judge sees content only when it is created, edited by its author or explicitly
+    re-run. Applying a fix never re-sends the content; earlier AI suggestions are carried over.
+  * Two people deciding at once cannot both win: writes are guarded and the loser is told.
   * Approved content is locked.
   * Every action is written to the audit log.
 """
 from __future__ import annotations
 
 import json
-import sqlite3
+import re
 from typing import Callable, Optional
 
-from . import engine, llm
+from . import engine
 from .db import now
+from .errors import Forbidden, NotFound
 from .kb import ACCESS_LEVELS
+from .models import Finding
 
 APPROVER_ROLES = {"manager", "reviewer"}
 RISKY = {"fact", "claim"}
+
+MAX_TITLE, MAX_BODY, MAX_IMAGES, MAX_FIELD, MAX_COMMENT = 200, 50_000, 20, 500, 2000
+_HEX = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _text(value, label: str, limit: int, required: bool = False) -> str:
+    """Validate user text: must be a string, within the limit, and non-blank when required."""
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be text")
+    value = value.replace("\r\n", "\n")
+    if required and not value.strip():
+        raise ValueError(f"{label} is required")
+    if len(value) > limit:
+        raise ValueError(f"{label} is too long (maximum {limit:,} characters)")
+    return value
+
+
+def _colour(value, label: str) -> str:
+    v = _text(value, label, 20).strip()
+    if not v:
+        return ""
+    m = _HEX.match(v)
+    if not m:
+        raise ValueError(f"{label} must look like #RRGGBB")
+    h = m.group(1)
+    h = "".join(ch * 2 for ch in h) if len(h) == 3 else h
+    return "#" + h.upper()
 
 
 # ---------------------------------------------------------------------- helpers
@@ -41,11 +75,11 @@ def clearance(user: dict) -> int:
 def get_content(conn, user: dict, content_id: int) -> dict:
     row = conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone()
     if not row:
-        raise LookupError("Content not found")
+        raise NotFound("Content not found")
     c = dict(row)
     # Creators and agencies only see their own work; manager, reviewer and admin see all.
     if user["role"] == "creator" and c["author_id"] != user["id"]:
-        raise PermissionError("You can only see your own content")
+        raise Forbidden("You can only see your own content")
     return c
 
 
@@ -79,13 +113,16 @@ def permissions(conn, user: dict, c: dict) -> dict:
         "can_approve": approver and not is_author and c["status"] == "in_review",
         "can_request_changes": approver and not is_author and c["status"] == "in_review",
         "can_comment": True,
-        "can_rerun": (is_author and editable) or user["role"] in APPROVER_ROLES | {"admin"},
+        "can_rerun": (is_author and editable) or (user["role"] in (APPROVER_ROLES | {"admin"})),
     }
 
 
 # ---------------------------------------------------------------------- review
-def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None) -> dict:
-    """(Re)review the current version. Dismissals made earlier on the same issue carry over."""
+def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, ai: str = "fresh") -> dict:
+    """(Re)review the current version. Dismissals made earlier on the same issue carry over.
+
+    ai="fresh": ask the AI judge (it sees the content).  ai="inherit": do NOT contact the AI;
+    suggestions it made on the previous version are re-located in the new text and kept."""
     c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
     v = current(conn, c)
     ver = c["current_version"]
@@ -93,8 +130,29 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None) 
         "SELECT * FROM findings WHERE content_id=? AND decision='dismissed'", (content_id,))]
     carry = {(p["source_id"], p["span_text"], p["category"]): p for p in previous}
 
-    judge = judge_factory(conn, content_id, ver) if judge_factory else None
-    result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge)
+    inherited: list[Finding] = []
+    if ai == "inherit" and ver > 1:
+        for r in conn.execute(
+                "SELECT * FROM findings WHERE content_id=? AND version=? AND ai_generated=1 "
+                "AND target='body' AND decision IN ('open','dismissed')", (content_id, ver - 1)):
+            start = v["body"].find(r["span_text"]) if r["span_text"] else -1
+            if start < 0:
+                continue  # the flagged text is gone, so the suggestion no longer applies
+            try:
+                inherited.append(Finding(
+                    category=r["category"], issue=r["issue"], span_text=r["span_text"], span_start=start,
+                    span_end=start + len(r["span_text"]), target="body", source_type=r["source_type"],
+                    source_id=r["source_id"], source_quote=r["source_quote"], severity=r["severity"],
+                    confidence=r["confidence"], suggested_fix=r["suggested_fix"], fix_note=r["fix_note"],
+                    ai_generated=True))
+            except Exception:
+                continue
+    judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
+    result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
+    if ai == "inherit" and not inherited:
+        previous = json.loads(version_row(conn, content_id, ver - 1)["review_meta"]).get("llm_status", "") if ver > 1 else ""
+        result.llm_status = ("not re-run for this change (content was not re-sent)"
+                             if previous.startswith(("used", "not re-run")) else "not used")
 
     conn.execute("DELETE FROM findings WHERE content_id=? AND version=?", (content_id, ver))
     conn.execute("DELETE FROM claims WHERE content_id=? AND version=?", (content_id, ver))
@@ -130,11 +188,8 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None) 
 # --------------------------------------------------------------------- content
 def create_content(conn, user: dict, title: str, body: str, images: list[dict],
                    judge_factory: Optional[Callable] = None) -> int:
-    title, body = (title or "").strip(), body or ""
-    if not title:
-        raise ValueError("Title is required")
-    if not body.strip():
-        raise ValueError("Content text is required")
+    title = _text(title, "Title", MAX_TITLE, required=True).strip()
+    body = _text(body, "Content text", MAX_BODY, required=True)
     images = _clean_images(images)
     cur = conn.execute(
         "INSERT INTO content(title, author_id, created_at) VALUES (?,?,?)", (title, user["id"], now()))
@@ -149,31 +204,46 @@ def create_content(conn, user: dict, title: str, body: str, images: list[dict],
 
 
 def _clean_images(images) -> list[dict]:
-    out = []
-    for img in images or []:
-        name = str(img.get("name", "")).strip()
+    if images is None:
+        return []
+    if not isinstance(images, list):
+        raise ValueError("Images must be a list")
+    if len(images) > MAX_IMAGES:
+        raise ValueError(f"At most {MAX_IMAGES} images per item")
+    out, seen = [], set()
+    for img in images:
+        if not isinstance(img, dict):
+            raise ValueError("Each image must be an object")
+        name = _text(img.get("name"), "Image name", 200).strip()
         if not name:
             continue
+        if name in seen:
+            raise ValueError(f"Image name '{name}' is used twice; names must be unique")
+        seen.add(name)
         out.append({
             "name": name,
-            "alt": str(img.get("alt", "") or "").strip(),
-            "text_color": str(img.get("text_color", "") or "").strip(),
-            "bg_color": str(img.get("bg_color", "") or "").strip(),
+            "alt": _text(img.get("alt"), "Alt text", MAX_FIELD).strip(),
+            "text_color": _colour(img.get("text_color"), "Text colour"),
+            "bg_color": _colour(img.get("bg_color"), "Background colour"),
         })
     return out
 
 
 def _new_version(conn, c: dict, user_id: int, body: str, images: list[dict], note: str,
-                 judge_factory: Optional[Callable]) -> int:
+                 judge_factory: Optional[Callable], ai: str = "fresh") -> int:
     ver = c["current_version"] + 1
+    # Guarded: succeeds only if nobody else created a version since this request read the content.
+    moved = conn.execute("UPDATE content SET current_version=? WHERE id=? AND current_version=?",
+                         (ver, c["id"], c["current_version"])).rowcount
+    if not moved:
+        raise ValueError("Someone else changed this content a moment ago. Reload and try again.")
     conn.execute(
         "INSERT INTO versions(content_id, version, body, images, created_by, note, created_at) VALUES (?,?,?,?,?,?,?)",
         (c["id"], ver, body, json.dumps(images), user_id, note, now()))
-    conn.execute("UPDATE content SET current_version=? WHERE id=?", (ver, c["id"]))
     audit(conn, c["id"], user_id, "version_created", f"v{ver}: {note}")
     conn.commit()
     c["current_version"] = ver
-    run_review(conn, c["id"], judge_factory)
+    run_review(conn, c["id"], judge_factory, ai)
     return ver
 
 
@@ -181,25 +251,24 @@ def revise(conn, user: dict, content_id: int, body: str, images: list[dict],
            judge_factory: Optional[Callable] = None) -> int:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_revise"]:
-        raise PermissionError("Only the author can edit, and only while the content is a draft or has changes requested")
-    if not (body or "").strip():
-        raise ValueError("Content text is required")
+        raise Forbidden("Only the author can edit, and only while the content is a draft or has changes requested")
+    body = _text(body, "Content text", MAX_BODY, required=True)
     return _new_version(conn, c, user["id"], body, _clean_images(images), "Edited by author", judge_factory)
 
 
 # -------------------------------------------------------------------- decisions
 def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] = None,
            reason: Optional[str] = None, judge_factory: Optional[Callable] = None) -> dict:
-    f = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
-    if not f:
-        raise LookupError("Finding not found")
-    f = dict(f)
+    row = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
+    if not row:
+        raise NotFound("Finding not found")
+    f = dict(row)
     c = get_content(conn, user, f["content_id"])
     perms = permissions(conn, user, c)
     if c["status"] == "approved":
-        raise PermissionError("Approved content is locked")
+        raise Forbidden("Approved content is locked")
     if not perms["can_decide"]:
-        raise PermissionError("You cannot make decisions on this content right now")
+        raise Forbidden("You cannot make decisions on this content right now")
     if f["version"] != c["current_version"]:
         raise ValueError("This finding belongs to an older version")
     if f["decision"] != "open":
@@ -208,25 +277,27 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         raise ValueError("action must be accept, edit or dismiss")
 
     if action == "dismiss":
-        reason = (reason or "").strip()
+        reason = _text(reason, "Reason", MAX_FIELD).strip()
         if not reason:
             raise ValueError("A reason is required to dismiss a finding")
         if (f["category"] in RISKY or f["needs_reviewer"]) and not perms["can_dismiss_risky"]:
-            raise PermissionError("Only a manager or reviewer can dismiss fact, claim or low-confidence findings")
-        conn.execute(
-            "UPDATE findings SET decision='dismissed', decision_reason=?, decided_by=?, decided_at=? WHERE id=?",
-            (reason, user["id"], now(), finding_id))
+            raise Forbidden("Only a manager or reviewer can dismiss fact, claim or low-confidence findings")
+        if not conn.execute(
+                "UPDATE findings SET decision='dismissed', decision_reason=?, decided_by=?, decided_at=? "
+                "WHERE id=? AND decision='open'", (reason, user["id"], now(), finding_id)).rowcount:
+            raise ValueError("Someone else already decided this finding")
         audit(conn, c["id"], user["id"], "finding_dismissed", f"#{finding_id} {f['source_id']}: {reason}")
         conn.commit()
         return {"decision": "dismissed", "new_version": None}
 
-    replacement = f["suggested_fix"] if action == "accept" else text
-    if action == "accept" and not replacement:
-        raise ValueError("This finding has no suggested fix. Use edit to write one, or dismiss it.")
-    if action == "edit" and (replacement is None or (replacement == "" and f["target"] != "body")):
-        raise ValueError("Provide the replacement text")
-    if f["category"] in RISKY and action == "edit" and f["ai_generated"]:
-        pass  # allowed: a person is rewriting it
+    if action == "accept":
+        replacement = f["suggested_fix"]
+        if not replacement:
+            raise ValueError("This finding has no suggested fix. Use edit to write one, or dismiss it.")
+    else:
+        if text is None:
+            raise ValueError("Provide the replacement text")
+        replacement = _text(text, "Replacement", 2000)
     v = current(conn, c)
     body, images = v["body"], [dict(i) for i in v["images"]]
     if f["target"] == "body":
@@ -234,27 +305,38 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         if body[s:e] != f["span_text"]:
             raise ValueError("The content changed since this review. Re-run the review first.")
         body = body[:s] + replacement + body[e:]
+        if not body.strip():
+            raise ValueError("That change would leave the content empty")
     else:
         field, name = f["target"].split(":", 1)
         img = next((i for i in images if i["name"] == name), None)
         if not img:
             raise ValueError("Image no longer exists in this version")
-        img["alt" if field == "image.alt" else "text_color"] = replacement
-    conn.execute(
-        "UPDATE findings SET decision=?, decision_text=?, decided_by=?, decided_at=? WHERE id=?",
-        ("accepted" if action == "accept" else "edited", replacement, user["id"], now(), finding_id))
-    audit(conn, c["id"], user["id"], f"finding_{'accepted' if action == 'accept' else 'edited'}",
+        if field == "image.alt":
+            replacement = replacement.strip()
+            img["alt"] = replacement
+        else:
+            replacement = _colour(replacement, "Colour")
+            img["text_color"] = replacement
+        if not replacement:
+            raise ValueError("Provide the replacement text")
+    verb = "accepted" if action == "accept" else "edited"
+    if not conn.execute(
+            "UPDATE findings SET decision=?, decision_text=?, decided_by=?, decided_at=? "
+            "WHERE id=? AND decision='open'", (verb, replacement, user["id"], now(), finding_id)).rowcount:
+        raise ValueError("Someone else already decided this finding")
+    audit(conn, c["id"], user["id"], f"finding_{verb}",
           f"#{finding_id} {f['source_id']}: {f['span_text']!r} -> {replacement!r}")
     ver = _new_version(conn, c, user["id"], body, images,
-                       f"{'Accepted' if action == 'accept' else 'Edited'} fix for {f['source_id']} ({f['span_text']})",
-                       judge_factory)
-    return {"decision": "accepted" if action == "accept" else "edited", "new_version": ver}
+                       f"{verb.capitalize()} fix for {f['source_id']} ({f['span_text']})",
+                       judge_factory, ai="inherit")  # applying a fix never re-sends content to the AI
+    return {"decision": verb, "new_version": ver}
 
 
 # --------------------------------------------------------------- collaboration
 def comment(conn, user: dict, content_id: int, body: str, finding_id: Optional[int] = None) -> None:
     c = get_content(conn, user, content_id)
-    body = (body or "").strip()
+    body = _text(body, "Comment", MAX_COMMENT).strip()
     if not body:
         raise ValueError("Comment is empty")
     conn.execute("INSERT INTO comments(content_id, finding_id, user_id, body, created_at) VALUES (?,?,?,?,?)",
@@ -266,7 +348,7 @@ def comment(conn, user: dict, content_id: int, body: str, finding_id: Optional[i
 def submit(conn, user: dict, content_id: int) -> None:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_submit"]:
-        raise PermissionError("Only the author can submit, and only a draft or content with changes requested")
+        raise Forbidden("Only the author can submit, and only a draft or content with changes requested")
     conn.execute("UPDATE content SET status='in_review' WHERE id=?", (c["id"],))
     audit(conn, c["id"], user["id"], "submitted", f"v{c['current_version']} with {len(open_findings(conn, c))} open findings")
     conn.commit()
@@ -275,9 +357,9 @@ def submit(conn, user: dict, content_id: int) -> None:
 def approve(conn, user: dict, content_id: int) -> None:
     c = get_content(conn, user, content_id)
     if user["role"] not in APPROVER_ROLES:
-        raise PermissionError("Only a manager or reviewer can approve")
+        raise Forbidden("Only a manager or reviewer can approve")
     if c["author_id"] == user["id"]:
-        raise PermissionError("You cannot approve your own content")
+        raise Forbidden("You cannot approve your own content")
     if c["status"] != "in_review":
         raise ValueError("Only content that is in review can be approved")
     if open_findings(conn, c):
@@ -287,7 +369,7 @@ def approve(conn, user: dict, content_id: int) -> None:
         (r["category"] in RISKY and r["decision"] == "dismissed") or (r["needs_reviewer"] and r["decision"] == "dismissed")
         for r in cur)
     if needs_reviewer and user["role"] != "reviewer":
-        raise PermissionError("A reviewer must approve because a claim or low-confidence finding was dismissed")
+        raise Forbidden("A reviewer must approve because a claim or low-confidence finding was dismissed")
     conn.execute("UPDATE content SET status='approved' WHERE id=?", (c["id"],))
     audit(conn, c["id"], user["id"], "approved", f"v{c['current_version']}")
     conn.commit()
@@ -296,8 +378,9 @@ def approve(conn, user: dict, content_id: int) -> None:
 def request_changes(conn, user: dict, content_id: int, note: str) -> None:
     c = get_content(conn, user, content_id)
     if not permissions(conn, user, c)["can_request_changes"]:
-        raise PermissionError("Only a manager or reviewer can request changes on content in review")
-    if not (note or "").strip():
+        raise Forbidden("Only a manager or reviewer can request changes on content in review")
+    note = _text(note, "Note", MAX_FIELD)
+    if not note.strip():
         raise ValueError("Say what needs to change")
     conn.execute("UPDATE content SET status='changes_requested' WHERE id=?", (c["id"],))
     conn.execute("INSERT INTO comments(content_id, finding_id, user_id, body, created_at) VALUES (?,?,?,?,?)",
