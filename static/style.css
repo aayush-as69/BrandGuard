@@ -21,20 +21,26 @@ header h1::before{content:"";width:16px;height:18px;background:var(--accent);
   clip-path:polygon(50% 0,100% 18%,100% 55%,50% 100%,0 55%,0 18%)}
 header .tag{color:var(--mute);font-size:13px}
 header .sp{flex:1}
+#acct{gap:6px;flex-wrap:nowrap}#acct .btn{padding:5px 10px;font-size:13px;white-space:nowrap}#acct-name{white-space:nowrap}
+#signin{flex-wrap:nowrap}
+@media(max-width:1180px){header .tag{display:none}}
 nav{display:flex;gap:2px;padding:3px;background:var(--sunk);border:1px solid var(--edge);border-radius:11px}
-nav button{background:none;border:0;padding:6px 14px;font:inherit;font-size:13.5px;color:var(--mute);cursor:pointer;border-radius:8px;
+nav button{white-space:nowrap;background:none;border:0;padding:6px 14px;font:inherit;font-size:13.5px;color:var(--mute);cursor:pointer;border-radius:8px;
   transition:background .15s,color .15s}
 nav button:hover{color:var(--ink)}
 nav button.on{color:var(--ink);background:var(--raised);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
 select,input,textarea,button{font:inherit}
-select,input[type=text],input[type=email],input[type=password],textarea{border:1px solid var(--edge);border-radius:9px;padding:7px 10px;
+select,input:not([type=checkbox]):not([type=file]):not([type=radio]),textarea{border:1px solid var(--edge);border-radius:9px;padding:7px 10px;
   background:var(--sunk);color:var(--ink);width:100%}
 select{width:auto}
+.row input:not([type=checkbox]):not([type=file]){width:auto;flex:1 1 170px;min-width:0}
+form.row{align-items:center}
 input::placeholder,textarea::placeholder{color:#7f8ba8}
 select:focus,input:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px #62d9cf26}
 input[type=checkbox]{accent-color:var(--accent);width:auto}
 textarea{resize:vertical}
 main{max-width:1280px;margin:0 auto;padding:22px 24px}
+main>.card+.card{margin-top:16px}
 .grid{display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start}
 @media(max-width:900px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--edge);border-radius:14px;padding:18px;overflow-x:auto}
@@ -103,7 +109,8 @@ a{color:var(--accent)}
 .claim .tags span{font-size:12px;font-weight:600;white-space:nowrap}
 @media(max-width:900px){.grid2{grid-template-columns:1fr}}
 @media(max-width:700px){
-  header{flex-wrap:wrap;gap:8px 12px;padding:10px 14px}
+  header{position:static;flex-wrap:wrap;gap:8px 12px;padding:10px 14px}
+  #acct,#signin{flex-wrap:wrap}
   header .tag,header label{display:none}
   header .sp{display:none}
   #who{margin-left:auto;max-width:60vw}
