@@ -9,7 +9,7 @@ async function boot(){
     if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});history.replaceState({},'','/');afterLogin();return}catch(e2){}}
     accountUI();showPublic();return}
   USERS=await api('/api/users');
-  $('#who').innerHTML='<option value="">Choose…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.name)} · ${u.role}${u.is_external?' (agency)':''}</option>`).join('');
+  $('#who').innerHTML='<option value="">Switch role…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.role[0].toUpperCase()+u.role.slice(1))} · ${esc(u.name)}${u.is_external?' · agency':''}</option>`).join('');
   try{ME=await api('/api/me');$('#who').value=ME.id;afterLogin()}catch(e){landing()}
 }
 $('#who').onchange=e=>run(async()=>{
