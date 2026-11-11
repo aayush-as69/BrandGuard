@@ -6,9 +6,9 @@ async function renderContent(){
   const rid=++RID;
   const list=await api('/api/content?limit='+LISTN);
   if(rid!==RID)return;
-  $('#main').innerHTML=`<div class="grid"><div class="stack">
-    <div class="card"><div class="u-between row"><h2 class="u-m0">Content</h2>
-      <button class="btn primary" data-c="showNew">New</button></div><div class="u-mt12" id="list">
+  $('#main').innerHTML=`<div class="page-head"><div><div class="eyebrow">CONTENT WORKSPACE</div><h2>Review content with confidence.</h2><p>Draft, inspect findings, resolve issues, and keep an accountable version history.</p></div><button class="btn primary" data-c="showNew">+ New review</button></div>
+  <div class="grid"><div class="stack">
+    <div class="card"><div class="u-between row"><div><h2 class="u-m0">Your content</h2><p class="small muted u-m8-0-0">Recent drafts and approvals</p></div><button class="btn" data-c="showNew">New</button></div><div class="u-mt12" id="list">
       ${list.length?list.map(c=>`<div class="item ${c.id===CUR?'on':''}" tabindex="0" role="button" data-kb="1" data-c="openContent" data-a='[${c.id}]'>
         <b>${esc(c.title)}</b><span class="small muted">${esc(c.author)} · v${c.current_version}</span><br>
         <span class="chip ${cls(c.status)}">${label(c.status)}</span>
@@ -35,7 +35,7 @@ document.addEventListener('change',e=>{const t=e.target;if(!t.dataset||!t.datase
 function readImgs(){return [...document.querySelectorAll('#imgs .imgrow')].map(r=>{const o={};r.querySelectorAll('input').forEach(i=>o[i.dataset.k]=i.value);return o}).filter(o=>o.name)}
 function showNew(){
   CUR=null;DETAIL=null;
-  $('#detail').innerHTML=`<div class="card stack"><h2>Submit content for review</h2>
+  $('#detail').innerHTML=`<div class="card stack"><div class="section-kicker">NEW REVIEW</div><h2>Submit content for review</h2><p class="muted small">Paste the draft you want to check. Findings are tied back to the approved knowledge base.</p>
    <div><label class="small muted" for="nt">Title</label><input type="text" id="nt" maxlength="200"></div>
    <div><label class="small muted" for="nb">Text (paste an email, post or page)</label><textarea id="nb" rows="12" maxlength="50000"></textarea></div>
    <div><label class="small muted">Images (checked for alt text and text contrast)</label><div id="imgs"></div>
