@@ -49,7 +49,7 @@ def page(server):
 
 
 def test_tour_review_and_keyboard_flow(page):
-    page.click("text=Take the 2-minute tour")
+    page.click("header [data-c=tourStart]")
     page.click("#tour-nx")  # step 0 is the introduction
     for _ in range(2):  # step 1 loads the knowledge base as admin, step 2 drafts the demo email as the agency writer
         page.click("#tour-do")
