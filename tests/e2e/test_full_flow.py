@@ -50,6 +50,9 @@ def page(server):
 
 
 def sign_in(pg, email, password=PW):
+    if pg.locator("#email").count() == 0:
+        pg.click("#hdr-signin")
+    pg.wait_for_selector("#email")
     pg.fill("#email", email)
     pg.fill("#password", password)
     pg.click("#signin button[type=submit]")
@@ -58,7 +61,7 @@ def sign_in(pg, email, password=PW):
 
 def sign_out(pg):
     pg.click("#signout")
-    pg.wait_for_selector("#signin:not(.hidden)")
+    pg.wait_for_selector("#hdr-signin:not(.hidden)")
 
 
 def test_account_to_approval_and_logout(page):
@@ -102,3 +105,21 @@ def test_account_to_approval_and_logout(page):
     sign_out(pg)
     assert pg.locator("#nav").is_hidden()
     assert not pg.errors, pg.errors
+
+
+def test_sign_in_has_its_own_page(page):
+    assert page.locator("#email").count() == 0                       # the front page has no form
+    page.click("#hdr-signin")
+    page.wait_for_selector("#email")
+    assert page.url.endswith("/login") and "Sign in" in page.title()
+    page.fill("#email", ADMIN); page.fill("#password", "wrong-password-here")
+    page.click("#signin button[type=submit]")
+    page.locator("#login-err:not(:empty)").wait_for()
+    assert page.url.endswith("/login")                                # still on the sign-in page, with the reason shown
+    page.fill("#password", PW)
+    page.click("#signin button[type=submit]")
+    page.wait_for_selector("#acct:not(.hidden)")
+    assert "/login" not in page.url                                   # signed in: back at "/"
+    page.goto(page.url.rstrip("/") + "/login")                        # opening /login directly while signed in goes to the app
+    page.wait_for_selector("#acct:not(.hidden)")
+    assert "/login" not in page.url

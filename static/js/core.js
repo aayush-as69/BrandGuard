@@ -15,7 +15,7 @@ async function api(path,opt={}){
   return d;
 }
 function signedOut(msg){ME=null;CUR=null;DETAIL=null;$('#nav').classList.add('hidden');$('#who').value='';accountUI();
-  landing(msg)}
+  if(AUTH==='accounts'){history.replaceState({},'','/');document.title='BrandGuard'}landing(msg)}
 function toast(msg,err){const t=$('#toast');t.setAttribute('role',err?'alert':'status');t.textContent=msg;t.className='toast'+(err?' err':'');clearTimeout(toast.h);toast.h=setTimeout(()=>t.className='toast hidden',4200)}
 async function run(fn){try{await fn()}catch(e){toast(e.message,true)}}
 

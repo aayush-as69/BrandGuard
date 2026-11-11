@@ -31,6 +31,9 @@ def test_every_visible_control_has_a_name_on_each_screen(page):
 
 
 def test_keyboard_only_sign_in_and_navigation(page):
+    page.focus("#hdr-signin")
+    page.keyboard.press("Enter")                       # the header link opens the sign-in page
+    page.wait_for_selector("#email")
     page.focus("#email")
     page.keyboard.type(ADMIN)
     page.keyboard.press("Tab")
