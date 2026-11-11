@@ -7,8 +7,9 @@ async function renderKB(){
   if(rid!==RID)return;
   KBDATA=k;
   const admin=ME.role==='admin';
-  $('#main').innerHTML=`<div class="stack">
-   ${admin?`<div class="card stack"><h2>Import (admin)</h2>
+  $('#main').innerHTML=`<div class="page-head"><div><div class="eyebrow">SOURCE OF TRUTH</div><h2>Knowledge base</h2><p>Keep guidelines, approved facts, terminology and reusable assets in one controlled place.</p></div>${admin?'<span class="chip approved">Admin controls</span>':''}</div>
+  <div class="stack">
+   ${admin?`<div class="card stack"><div class="section-kicker">ADMIN · KNOWLEDGE MANAGEMENT</div><h2>Bring in approved material</h2><p class="muted small">Import a source or load the fictional Brewline demo workspace for testing.</p>
      <div class="row"><button class="btn primary" data-c="seed">Load Brewline demo knowledge base</button>
        <span class="small muted">Replaces the current knowledge base with synthetic demo data.</span></div>
      <div class="row"><select class="u-wauto" id="ik" aria-label="What to import"><option value="guidelines">Guidelines (PDF, DOCX, TXT, MD)</option>
@@ -18,11 +19,11 @@ async function renderKB(){
        <input type="file" id="ifile" aria-label="File to import"></div>
      <textarea id="itext" rows="3" aria-label="Pasted text or JSON" placeholder="…or paste text / JSON here"></textarea>
      <div><button class="btn" data-c="doImport">Import</button></div></div>`:''}
-   <div class="card"><h2>Guidelines</h2>${k.guidelines.map(g=>`<p><b>${esc(g.title)}</b> <span class="chip">${esc(g.access_level)}</span></p>
+   <div class="card"><div class="section-kicker">01 · GUIDELINES</div><h2>Guidelines</h2><p class="muted small">Rules the review engine can cite when it flags content.</p>${k.guidelines.map(g=>`<p><b>${esc(g.title)}</b> <span class="chip">${esc(g.access_level)}</span></p>
      <table>${g.rules.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td><b>${esc(r.title)}</b><div>${esc(r.text)}</div></td>${admin?`<td class="nowrap">${kbBtns('rules',r.code)}</td>`:''}</tr>`).join('')}</table>`).join('')||'<p class="muted small">None visible to you.</p>'}</div>
-   <div class="card"><h2>Approved facts</h2>${k.facts.length?`<table>${k.facts.map(f=>`<tr><td><code>${esc(f.code)}</code></td><td>${esc(f.kind)}</td><td>${esc(f.statement)}<div class="muted small">${esc(f.source)} · ${esc(f.access_level)}</div></td>${admin?`<td class="nowrap">${kbBtns('facts',f.code)}</td>`:''}</tr>`).join('')}</table>`:'<p class="muted small">None visible to you. Facts are confidential, so only managers, reviewers and admins can browse them.</p>'}</div>
-   <div class="card"><h2>Glossary</h2><table>${k.glossary.map(g=>`<tr><td>${esc(g.kind)}</td><td>${esc(g.term)} → <b>${esc(g.preferred)}</b></td><td><code>${esc(g.rule_code)}</code></td>${admin?`<td class="nowrap">${kbBtns('glossary',g.id)}</td>`:''}</tr>`).join('')}</table></div>
-   <div class="card"><h2>Reusable assets</h2><table>${k.assets.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.kind)}</td><td class="muted">${esc(a.note)}</td>${admin?`<td class="nowrap">${kbBtns('assets',a.id)}</td>`:''}</tr>`).join('')}</table></div></div>`;
+   <div class="card"><div class="section-kicker">02 · APPROVED FACTS</div><h2>Approved facts</h2><p class="muted small">Claims the team has explicitly verified and allowed BrandGuard to use.</p>${k.facts.length?`<table>${k.facts.map(f=>`<tr><td><code>${esc(f.code)}</code></td><td>${esc(f.kind)}</td><td>${esc(f.statement)}<div class="muted small">${esc(f.source)} · ${esc(f.access_level)}</div></td>${admin?`<td class="nowrap">${kbBtns('facts',f.code)}</td>`:''}</tr>`).join('')}</table>`:'<p class="muted small">None visible to you. Facts are confidential, so only managers, reviewers and admins can browse them.</p>'}</div>
+   <div class="card"><div class="section-kicker">03 · GLOSSARY</div><h2>Glossary</h2><p class="muted small">Preferred terminology and the rules attached to it.</p><table>${k.glossary.map(g=>`<tr><td>${esc(g.kind)}</td><td>${esc(g.term)} → <b>${esc(g.preferred)}</b></td><td><code>${esc(g.rule_code)}</code></td>${admin?`<td class="nowrap">${kbBtns('glossary',g.id)}</td>`:''}</tr>`).join('')}</table></div>
+   <div class="card"><div class="section-kicker">04 · REUSABLE ASSETS</div><h2>Reusable assets</h2><p class="muted small">Approved names, references and supporting materials.</p><table>${k.assets.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.kind)}</td><td class="muted">${esc(a.note)}</td>${admin?`<td class="nowrap">${kbBtns('assets',a.id)}</td>`:''}</tr>`).join('')}</table></div></div>`;
 }
 /* admin: change or remove one item (prompt/confirm keep this small; the server validates everything) */
 const kbBtns=(kind,key)=>`<button class="btn" data-k="${kind}" data-id="${esc(key)}" data-c="kbEdit" aria-label="Edit ${esc(key)}">Edit</button>
