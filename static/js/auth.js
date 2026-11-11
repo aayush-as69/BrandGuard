@@ -9,14 +9,18 @@ async function boot(){
     if(cfg2.sso){try{ME=await api('/api/sso/login',{json:{}});history.replaceState({},'','/');afterLogin();return}catch(e2){}}
     accountUI();showPublic();return}
   USERS=await api('/api/users');
-  $('#who').innerHTML='<option value="">Switch role…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.role[0].toUpperCase()+u.role.slice(1))} · ${esc(u.name)}${u.is_external?' · agency':''}</option>`).join('');
-  try{ME=await api('/api/me');$('#who').value=ME.id;afterLogin()}catch(e){landing()}
+  $('#who').innerHTML=AUTH==='demo'
+  ? '<option value="">Switch role…</option>'+USERS.map(u=>`<option value="${u.role}">${esc(u.role[0].toUpperCase()+u.role.slice(1))} · ${esc(u.name)}${u.is_external?' · agency':''}</option>`).join('')
+  : '<option value="">Switch role…</option>'+USERS.map(u=>`<option value="${u.id}">${esc(u.role[0].toUpperCase()+u.role.slice(1))} · ${esc(u.name)}${u.is_external?' · agency':''}</option>`).join('');
+  try{ME=await api('/api/me');$('#who').value=AUTH==='demo'?ME.role:ME.id;afterLogin()}catch(e){landing()}
 }
 $('#who').onchange=e=>run(async()=>{
   if(!e.target.value){await api('/api/logout',{json:{}});signedOut('Signed out. Pick a user to begin.');return}
-  const prev=ME?ME.id:'';
-  try{ME=await api('/api/login',{json:{user_id:+e.target.value,passcode:$('#pass').value}})}
-  catch(err){e.target.value=prev;throw err}
+  const prev=ME?ME.role:'';
+  try{
+    if(AUTH==='demo' && ME) ME=await api('/api/demo/switch-role',{json:{role:e.target.value}});
+    else ME=await api('/api/login',{json:{user_id:+e.target.value,passcode:$('#pass').value}});
+  }catch(err){e.target.value=prev;throw err}
   CUR=null;DETAIL=null;KBDATA=null;afterLogin()
 });
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;
