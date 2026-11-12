@@ -2,81 +2,76 @@
 function landing(note){
   const demo=AUTH!=='accounts';
   const cta=demo
-    ? '<div class="demo-login"><div class="demo-login-head"><span class="demo-badge">DEMO WORKSPACE</span><span class="small muted">One sign-in · switch roles anytime</span></div><div class="demo-login-row"><input id="demo-pass" type="password" class="demo-pass" placeholder="Demo passcode" aria-label="Demo passcode"><button class="btn primary" data-c="demoLogin">Enter demo</button></div><p class="demo-role-note">Starts in <b>Manager</b>. Use the role switch in the top bar to explore Creator, Reviewer and Admin.</p></div>'
-    : '<div class="landing-auth-actions"><button class="btn primary" data-c="demoFill">Try demo</button><button class="landing-secondary btn" data-c="goLogin">Sign in</button></div>';
+    ? '<div class="demo-login"><div class="demo-login-head"><span class="kicker">Demo workspace</span><span class="meta">Fictional Brewline Coffee content</span></div><div class="demo-login-row"><input id="demo-pass" type="password" class="demo-pass" placeholder="Demo passcode" aria-label="Demo passcode" autocomplete="off"><button class="btn primary" type="button" data-c="demoLogin">Enter demo</button></div><p class="demo-role-note">Starts as the brand manager. Use the role switch in the top bar to try writer, reviewer and admin views.</p></div>'
+    : `<button class="btn primary" type="button" data-c="${DEMO.available?'demoFill':'goLogin'}">${DEMO.available?'Try demo':'Sign in'}</button>${DEMO.available?'<button class="btn" type="button" data-c="goLogin">Sign in</button>':''}`;
+  const step=(t,d)=>`<li><b>${t}</b>${d}</li>`;
+  const catches=(t,d,ex)=>`<article class="card"><h3>${t}</h3><p>${d}</p><p class="ex">${ex}</p></article>`;
+  const trust=(t,d)=>`<article class="card"><h3>${t}</h3><p>${d}</p></article>`;
   $('#main').innerHTML=`<div class="landing">
-    ${note?`<p class="landing-notice" role="status">${esc(note)}</p>`:''}
-    <section class="landing-hero" aria-labelledby="landing-title">
-      <div class="hero-copy">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> BRAND GOVERNANCE, BUILT FOR REAL WORK</div>
-        <h2 id="landing-title" class="hero-h">Make every piece of content <span>feel unmistakably yours.</span></h2>
-        <p class="hero-p">A clearer way to protect your brand. Review every draft against approved guidelines, trace decisions back to evidence, and keep people in control.</p>
+    ${note?`<p class="notice info landing-notice" role="status">${esc(note)}</p>`:''}
+    <section class="hero" aria-labelledby="landing-title">
+      <div>
+        <div class="kicker">Brand governance for content teams</div>
+        <h1 id="landing-title">Check content before it goes live.</h1>
+        <p class="hero-p">Review against approved brand guidelines, facts and assets, with evidence behind every finding. People make the final decision.</p>
         <div class="hero-actions">${cta}</div>
-        <div class="hero-assurance"><span class="assurance-icon">✓</span> Evidence-backed reviews <i></i><span>Human approval stays final</span></div>
-        ${demo?'<p class="demo-note">You are viewing a safe demo workspace with fictional Brewline Coffee content.</p>':''}
+        <p class="hero-sub">For brand, marketing and agency teams who need every draft held to the same standard.</p>
       </div>
-
-      <div class="review-stage" aria-label="Illustration of a BrandGuard content review">
-        <div class="stage-orbit orbit-one"></div><div class="stage-orbit orbit-two"></div>
-        <div class="review-window">
-          <div class="window-top"><div class="window-brand"><img src="/static/brandguard-mark.svg" alt="" width="22" height="22"><span>BRANDGUARD</span></div><span class="window-live"><b></b> REVIEW PREVIEW</span><span class="window-dots">•••</span></div>
-          <div class="window-body">
-            <div class="window-heading"><div><span class="window-kicker">CAMPAIGN / 024</span><h3>Summer launch email</h3><p>Draft review · Marketing team</p></div><span class="status-pill">Needs attention</span></div>
-            <div class="preview-label">CONTENT PREVIEW <span>EMAIL COPY</span></div>
-            <div class="draft-paper">
-              <div class="paper-brand"><span class="paper-mark">b.</span> brewline <span class="paper-type">COFFEE CO.</span></div>
-              <p class="paper-subject">A better kind of afternoon.</p>
-              <p>Meet your new summer ritual. Our slow-steeped cold brew is here to make the everyday feel a little more extraordinary.</p>
-              <p>It's <mark class="flagged-phrase">the best coffee in India</mark> — and it's waiting for you.</p>
-              <div class="paper-footer">BREWED WITH INTENTION · EST. 2018</div>
-            </div>
-            <div class="finding-panel">
-              <div class="finding-top"><span class="finding-symbol">!</span><div><b>Unsupported superlative</b><small>Brand voice · Claim substantiation</small></div><span class="finding-level">HIGH</span></div>
-              <p>“Best coffee in India” has no approved supporting evidence.</p>
-              <div class="evidence-line"><span>↳</span><span><b>Source rule</b> · Avoid unverified superiority claims.</span></div>
-              <div class="suggestion"><span>Suggested alternative</span><b>“A cold brew worth slowing down for.”</b></div>
-            </div>
-            <div class="window-bottom"><span><b>01</b> finding identified</span><span>Evidence linked <b class="linked-check">✓</b></span></div>
-          </div>
+      <div class="preview" role="img" aria-label="Illustration: a draft email with one flagged claim, the guideline quoted as evidence, and a suggested fix.">
+        <div class="preview-bar"><span>Summer launch email · Brewline Coffee (fictional)</span><span class="chip changes_requested">1 finding needs a decision</span></div>
+        <div class="preview-body">
+          <div class="paper"><b>A better kind of afternoon.</b>Meet your new summer ritual. It’s <span class="flag">the best coffee in India</span> and it’s waiting for you.</div>
+          <div class="f-step"><span class="f-label">Finding</span><div class="row">${sev('high')}<span class="f-why">Unsupported claim</span></div></div>
+          <div class="evidence"><div class="evidence-src"><span class="chip">Guideline G-04</span><span class="muted">Claims</span></div>
+            <blockquote>Every comparative, superlative, ranking or numeric claim must match an approved fact in the fact sheet.</blockquote></div>
+          <div class="diff"><div class="diff-row"><span class="diff-tag">Original</span><span><del>the best coffee in India</del></span></div>
+            <div class="diff-row"><span class="diff-tag">Proposed</span><span><ins>a cold brew worth slowing down for</ins></span></div></div>
         </div>
-        <div class="stage-float float-evidence"><span class="float-icon">⌁</span><span><b>Traceable by design</b><small>Every finding has a source</small></span></div>
-        <div class="stage-float float-human"><span class="float-icon human-icon">✓</span><span><b>Human decision</b><small>Nothing auto-approves</small></span></div>
-      </div>
-      <div class="hero-index"><span>01</span><i></i> FROM FIRST DRAFT TO FINAL APPROVAL</div>
-    </section>
-
-    <section class="trust-strip" aria-label="BrandGuard principles">
-      <span class="trust-intro">BUILT AROUND THE RIGHT PRINCIPLES</span>
-      <div><b class="trust-check">✓</b><span>Approved sources</span></div><div><b class="trust-check">✓</b><span>Explainable findings</span></div><div><b class="trust-check">✓</b><span>Human accountability</span></div><div><b class="trust-check">✓</b><span>Role-aware access</span></div>
-    </section>
-
-    <section class="story-section" aria-labelledby="story-title">
-      <div class="section-intro"><div class="eyebrow">A REVIEW PROCESS YOU CAN TRUST</div><h3 id="story-title">From “does this sound right?”<br><span>to “we know why it is right.”</span></h3><p>Brand consistency should not depend on who happens to review a draft. BrandGuard gives teams a shared, evidence-led process.</p></div>
-      <div class="process-list">
-        <article class="process-step"><span class="process-number">01</span><div><h4>Ground every review in your rules.</h4><p>Use an approved knowledge base of guidelines, facts, terminology and assets as the source of truth.</p></div><span class="process-arrow">↗</span></article>
-        <article class="process-step"><span class="process-number">02</span><div><h4>See the issue and the evidence.</h4><p>Findings point to the source behind them, with context and practical suggestions for what to change.</p></div><span class="process-arrow">↗</span></article>
-        <article class="process-step"><span class="process-number">03</span><div><h4>Keep the final call with people.</h4><p>Reviewers resolve decisions, managers approve work, and the audit trail records what happened.</p></div><span class="process-arrow">↗</span></article>
       </div>
     </section>
 
-    <section class="capability-section" aria-labelledby="capability-title">
-      <div class="capability-heading"><div><div class="eyebrow">MORE THAN A SPELLCHECK</div><h3 id="capability-title">Guardrails for the whole<br><span>content lifecycle.</span></h3></div><p>Built to make brand standards useful in daily work—not another document people forget to open.</p></div>
-      <div class="capability-grid">
-        <article class="capability-card capability-featured"><span class="capability-icon">⌕</span><span class="capability-label">01 / EVIDENCE</span><h4>Every finding has a reason.</h4><p>See the approved rule or fact behind a flag. No mystery scores or unsupported warnings.</p><span class="capability-motif">↗</span></article>
-        <article class="capability-card"><span class="capability-icon">✳</span><span class="capability-label">02 / INTELLIGENCE</span><h4>Rules first. AI with boundaries.</h4><p>Deterministic checks handle clear rules. Optional AI assists with tone while respecting privacy controls.</p></article>
-        <article class="capability-card"><span class="capability-icon">◎</span><span class="capability-label">03 / ACCOUNTABILITY</span><h4>People stay responsible.</h4><p>Role-based decisions and explicit approvals keep important brand calls in human hands.</p></article>
-        <article class="capability-card"><span class="capability-icon">⌘</span><span class="capability-label">04 / CONTROL</span><h4>The right access, by design.</h4><p>Keep internal and confidential material limited to the people cleared to see it.</p></article>
+    <section aria-labelledby="how-title">
+      <div class="section-head"><div class="kicker">How it works</div><h2 id="how-title">From first draft to final approval, with the reasoning visible.</h2></div>
+      <ol class="flow">
+        ${step('Draft','Paste an email, post or page, with its images.')}
+        ${step('Finding','Rules and approved facts flag the problem, with severity and confidence.')}
+        ${step('Evidence','The exact guideline or fact is quoted beside the flagged text.')}
+        ${step('Suggested fix','Compare the change. Nothing is applied until a person accepts it.')}
+        ${step('Approval','A different person approves. Every step lands in the audit trail.')}
+      </ol>
+    </section>
+
+    <section aria-labelledby="catch-title">
+      <div class="section-head"><div class="kicker">What it prevents</div><h2 id="catch-title">The mistakes that slip through manual review.</h2><p>Checked against your own guidelines and approved facts. Examples below come from the fictional Brewline demo.</p></div>
+      <div class="cards">
+        ${catches('Unsupported claims','Rankings and superlatives with no approved source.','“India’s #1 coffee”')}
+        ${catches('Wrong facts','Prices and dates that differ from the approved fact sheet.','₹399 on the page, ₹449 approved')}
+        ${catches('Off-brand language','Banned terms, slang, hype and too many exclamation marks.','“cheap” becomes “affordable”')}
+        ${catches('Inaccessible images','Missing alt text and low-contrast text on images.','Contrast 2.8:1, minimum 4.5:1')}
       </div>
     </section>
 
-    <section class="closing-panel"><div><div class="eyebrow">BETTER REVIEWS. STRONGER BRANDS.</div><h3>Give every draft<br><span>a standard to live up to.</span></h3><p>Bring your guidelines, content and people into one accountable review flow.</p></div><div class="closing-action">${demo?'<button class="btn primary" data-c="tourStart">Explore BrandGuard <span aria-hidden="true">↗</span></button>':'<button class="btn primary" data-c="focusSignin">Continue to sign in <span aria-hidden="true">↗</span></button>'}<span>Clear standards. Confident decisions.</span></div></section>
-    <footer class="landing-footer"><span><img src="/static/brandguard-mark.svg" alt="" width="20" height="20"> BrandGuard</span><span>Brand integrity, made actionable.</span><span>BUILT FOR CLEARER DECISIONS</span></footer>
+    <section aria-labelledby="trust-title">
+      <div class="section-head"><div class="kicker">Why teams can trust it</div><h2 id="trust-title">Evidence first. Human control throughout.</h2></div>
+      <div class="cards">
+        ${trust('Every finding cites its source','The rule or approved fact behind a flag is quoted. No unexplained scores.')}
+        ${trust('Rules first, AI optional','Deterministic checks run first. Optional AI review is masked, must quote a real rule, and is never applied automatically.')}
+        ${trust('People decide','Authors accept, edit or dismiss each fix. Nobody approves their own work.')}
+        ${trust('Access by role','Confidential facts stay hidden from outside agencies, and every decision is recorded.')}
+      </div>
+    </section>
+
+    <section class="closing" aria-labelledby="close-title">
+      <div><h2 id="close-title">See a review from start to finish.</h2><p class="muted">${demo?'Take the two-minute guided tour of the demo workspace.':'Sign in with the account your administrator created.'}</p></div>
+      ${demo?'<button class="btn primary" type="button" data-c="tourStart">Take the guided tour</button>':'<button class="btn primary" type="button" data-c="focusSignin">Sign in</button>'}
+    </section>
+    <footer class="landing-footer"><span><img src="/static/brandguard-mark.svg" alt="" width="20" height="20"> BrandGuard</span><span>Evidence-backed brand governance with human control.</span></footer>
   </div>`;
 }
 async function demoLogin(){
   if(AUTH==='accounts'){goLogin();return}
   const pass=$('#demo-pass')?.value||'';
-  try{ME=await api('/api/login',{json:{user_id:2,passcode:pass}});CUR=null;DETAIL=null;KBDATA=null;afterLogin()}
+  try{ME=await api('/api/login',{json:{user_id:2,passcode:pass}});CUR=null;DETAIL=null;SEL=null;KBDATA=null;afterLogin().then(focusMain)}
   catch(e){toast(e.message,true);$('#demo-pass')?.focus()}
 }
 function focusSignin(){
@@ -99,28 +94,36 @@ function goLogin(){
   if(AUTH!=='accounts'){focusSignin();return}
   history.pushState({},'','/login');loginView()}
 function goHome(){history.pushState({},'','/');document.title='BrandGuard';landing()}
+/* The brand mark in the header always means "back to my starting point". */
+function brandHome(){
+  if(ME){TAB='content';CUR=null;DETAIL=null;SEL=null;markNav();render().then(focusMain);return}
+  if(AUTH==='accounts')goHome();else landing()}
+function togglePw(){
+  const i=$('#password'),b=$('#pw-toggle'),show=i.type==='password';
+  i.type=show?'text':'password';b.textContent=show?'Hide':'Show';b.setAttribute('aria-pressed',String(show));
+  b.setAttribute('aria-label',show?'Hide password':'Show password')}
 function loginView(note){
   document.title='Sign in · BrandGuard';
   $('#main').innerHTML=`<div class="login-wrap"><section class="login-card" aria-labelledby="login-h">
-    <img src="/static/brandguard-mark.svg" width="36" height="36" alt="">
-    <h2 id="login-h">Sign in to BrandGuard</h2>
+    <div class="login-brand"><img src="/static/brandguard-mark.svg" width="36" height="36" alt=""><span class="kicker">BrandGuard</span></div>
+    <h1 id="login-h">Sign in to BrandGuard</h1>
     <p class="muted small">Use the work email and password your administrator gave you.</p>
-    ${note?`<p class="small" role="status">${esc(note)}</p>`:''}
-    <form id="signin" autocomplete="on">
+    ${note?`<p class="notice info" role="status">${esc(note)}</p>`:''}
+    <form id="signin" autocomplete="on" novalidate>
       <label for="email">Email</label>
-      <input type="email" id="email" autocomplete="username" required>
+      <input type="email" id="email" autocomplete="username" aria-describedby="login-err">
       <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password" required>
+      <div class="pw-wrap"><input type="password" id="password" autocomplete="current-password" aria-describedby="login-err">
+        <button class="btn" type="button" id="pw-toggle" data-c="togglePw" aria-pressed="false" aria-label="Show password">Show</button></div>
       <div id="code-row" class="hidden"><label for="code">6-digit code from your authenticator app</label>
-        <input type="text" id="code" inputmode="numeric" pattern="[0-9 ]*" autocomplete="one-time-code"></div>
-      <p id="login-err" class="login-err small" role="alert"></p>
+        <input type="text" id="code" inputmode="numeric" pattern="[0-9 ]*" autocomplete="one-time-code" aria-describedby="login-err"></div>
+      <p id="login-err" class="login-err" role="alert"></p>
       <button class="btn primary login-go" type="submit">Sign in</button>
     </form>
-    <p class="small"><a href="/" data-c="goHome" class="login-back">Back to the home page</a></p>
+    <p class="login-aside"><a href="/" data-c="goHome" class="login-back">Back to the home page</a></p>
   </section></div>`;
   if(DEMO.available){
-    const formNote='<button type="button" class="btn demo-fill" data-c="demoFill">Use demo account</button>';
-    $('#signin').insertAdjacentHTML('beforebegin',formNote);
+    $('#signin').insertAdjacentHTML('beforebegin','<button type="button" class="btn demo-fill" data-c="demoFill">Use demo account</button>');
   }
   $('#email').focus()}
 window.addEventListener('popstate',()=>{if(!ME&&AUTH==='accounts')showPublic()});

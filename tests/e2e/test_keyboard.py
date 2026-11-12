@@ -42,7 +42,7 @@ def test_keyboard_only_sign_in_and_navigation(page):
     page.wait_for_selector("#acct:not(.hidden)")
     page.focus("#nav [data-tab=kb]")
     page.keyboard.press("Enter")
-    assert page.locator("#nav [data-tab=kb].on").count() == 1
+    assert page.locator("#nav [data-tab=kb][aria-current=page]").count() == 1
     seen = set()
     for _ in range(25):                                # Tab never gets stuck: focus keeps moving through real controls
         page.keyboard.press("Tab")
@@ -60,6 +60,8 @@ def test_list_items_and_highlights_work_with_enter_and_space(page):
     page.fill("#nt", "Kbd")
     page.fill("#nb", "Hi Dude, buy now!!")
     page.click("text=Review now")
+    page.wait_for_selector("mark")                      # the review opens in the workspace
+    page.click("text=← All content")                    # back to the list
     page.wait_for_selector(".item")
     item = page.locator(".item").first
     item.focus()

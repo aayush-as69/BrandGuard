@@ -143,7 +143,7 @@ def test_highlight_slices_by_code_point_not_utf16(neha):
 def test_ui_highlight_uses_code_points():
     from pathlib import Path
     js = "\n".join(f.read_text(encoding="utf-8") for f in sorted((Path(__file__).resolve().parent.parent / "static" / "js").glob("*.js")))
-    hl = js[js.index("function highlight"):js.index("function jump")]
+    hl = js[js.index("function highlight"):js.index("function findingsCard")]
     assert "Array.from(d.body)" in hl and "d.body.slice" not in hl
 
 

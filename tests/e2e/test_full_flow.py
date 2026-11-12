@@ -101,7 +101,9 @@ def test_account_to_approval_and_logout(page):
     # manager: approve
     sign_in(pg, "mo@brewline.in")
     pg.locator(".item", has_text="Launch email").click()
-    pg.click("button:has-text('Approve')")
+    pg.click("button:has-text('Approve review')")
+    pg.wait_for_selector("dialog[open] h2:has-text('Approve this version?')")      # approval is deliberate: an in-page confirmation
+    pg.click("dialog[open] button[type=submit]")
     pg.wait_for_selector(".chip:has-text('Approved')", timeout=10000)
     sign_out(pg)
     assert pg.locator("#nav").is_hidden()

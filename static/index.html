@@ -3,31 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="BrandGuard helps teams review content against approved brand guidelines, trace findings to evidence, and manage human approval.">
-<meta name="theme-color" content="#080914">
+<meta name="description" content="BrandGuard checks content against approved brand guidelines and facts before it goes live, shows the evidence behind every finding, and keeps people in charge of approval.">
+<meta name="theme-color" content="#0f1218">
 <link rel="icon" type="image/svg+xml" href="/static/brandguard-mark.svg">
 <title>BrandGuard</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 <header>
-  <h1><img class="brand-logo" src="/static/brandguard-mark.svg" width="28" height="28" alt="">BrandGuard</h1><span class="tag">Catch brand mistakes before they go live.</span>
-  <nav id="nav" class="hidden">
-    <button data-tab="content" class="on">Content</button>
-    <button data-tab="kb">Knowledge base</button>
-    <button data-tab="insights">Insights</button>
-    <button data-tab="users" class="hidden">Users</button>
+  <button class="brand" type="button" data-c="brandHome" aria-label="BrandGuard home"><img src="/static/brandguard-mark.svg" width="26" height="26" alt="">BrandGuard</button><span class="tag">Catch brand mistakes before they go live.</span>
+  <nav id="nav" class="hidden" aria-label="Main">
+    <button type="button" data-tab="content" aria-current="page">Content</button>
+    <button type="button" data-tab="kb">Knowledge base</button>
+    <button type="button" data-tab="insights">Insights</button>
+    <button type="button" data-tab="users" class="hidden">Users</button>
   </nav>
   <span class="sp"></span>
-  <button class="btn tour-only" data-c="tourStart" aria-label="Take the guided tour">Tour</button>
+  <button class="btn tour-only" type="button" data-c="tourStart" aria-label="Take the guided tour">Tour</button>
   <label class="small muted" for="who">Role</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off">
   <select id="who" aria-label="Signed in as"></select>
   <a href="/login" id="hdr-signin" class="btn primary hidden" data-c="goLogin">Sign in</a>
   <span id="acct" class="acct hidden">
     <button class="btn acct-btn" id="acct-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="acct-menu"><span id="acct-name"></span><span aria-hidden="true">▾</span></button>
-    <div class="acct-menu hidden" id="acct-menu" role="menu">
-      <div id="acct-role-row" class="hidden"><label for="demo-role" class="small muted">Switch demo role</label>
+    <div class="acct-menu hidden" id="acct-menu" role="menu" aria-label="Account">
+      <div id="acct-role-row" class="hidden field"><label for="demo-role">Switch demo role</label>
         <select id="demo-role" aria-label="Switch demo role">
           <option value="manager">Manager · Arjun</option><option value="reviewer">Reviewer · Meera</option>
           <option value="creator">Creator · Rahul</option><option value="agency">Agency writer · Neha</option></select></div>
@@ -36,13 +37,13 @@
       <button class="btn" id="signout" type="button" role="menuitem">Sign out</button>
     </div></span>
 </header>
-<main id="main"></main>
+<main id="main" tabindex="-1" aria-label="BrandGuard"></main>
 <aside id="tour" class="hidden" role="dialog" aria-labelledby="tour-h" aria-live="polite">
-  <div class="small muted" id="tour-n"></div><b id="tour-h"></b><p id="tour-t" class="small"></p>
-  <div class="row"><button class="btn" id="tour-b" data-c="tourStep" data-a='[-1]'>Back</button>
-   <button class="btn primary hidden" id="tour-do" data-c="tourDo">Do it for me</button>
-   <button class="btn" id="tour-nx" data-c="tourStep" data-a='[1]'>Next</button>
-   <button class="btn" data-c="tourClose" aria-label="Close the tour">Close</button></div>
+  <div class="meta" id="tour-n"></div><b id="tour-h"></b><p id="tour-t" class="small"></p>
+  <div class="row"><button class="btn" id="tour-b" type="button" data-c="tourStep" data-a='[-1]'>Back</button>
+   <button class="btn primary hidden" id="tour-do" type="button" data-c="tourDo">Do it for me</button>
+   <button class="btn" id="tour-nx" type="button" data-c="tourStep" data-a='[1]'>Next</button>
+   <button class="btn" type="button" data-c="tourClose" aria-label="Close the tour">Close</button></div>
 </aside>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
