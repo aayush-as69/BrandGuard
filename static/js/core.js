@@ -42,12 +42,12 @@ async function run(fn){try{await fn()}catch(e){toast(e.message,true)}}
 const skeleton=()=>`<div class="card" role="status"><span class="sr-only">Loading…</span><div class="skeleton" aria-hidden="true"><i class="w40"></i><i class="tall"></i><i></i><i class="w60"></i></div></div>`;
 const errorCard=(title,msg,retry='render')=>`<div class="card empty-state" role="alert"><div class="empty-icon" aria-hidden="true">!</div><h2>${esc(title)}</h2><p class="muted">${esc(msg)}</p><button class="btn primary" type="button" data-c="${retry}">Try again</button></div>`;
 const pageHead=(kicker,title,sub,extra='')=>`<div class="page-head"><div><div class="kicker">${esc(kicker)}</div><h1 id="page-title" tabindex="-1">${esc(title)}</h1><p>${esc(sub)}</p></div>${extra}</div>`;
-const PAGE_NAMES={content:'Content',kb:'Knowledge base',insights:'Insights',users:'Users'};
+const PAGE_NAMES={content:'Content',kb:'Knowledge base',insights:'Insights',benchmark:'Benchmark',users:'Users'};
 function focusMain(){const h=$('#page-title');if(h)h.focus({preventScroll:true})}
 
 let RID=0, LASTTAB=null; // only the most recent render may draw, so a slow earlier request cannot overwrite a newer screen
 function render(){
-  const f=TAB==='kb'?renderKB:TAB==='insights'?renderInsights:TAB==='users'?renderUsers:renderContent;
+  const f=TAB==='kb'?renderKB:TAB==='insights'?renderInsights:TAB==='benchmark'?renderBenchmark:TAB==='users'?renderUsers:renderContent;
   // Show a skeleton when the person moves to another screen; refreshing the same screen never blanks it.
   if(LASTTAB!==TAB){$('#main').innerHTML=skeleton();LASTTAB=TAB}
   if(ME)document.title=(PAGE_NAMES[TAB]||'BrandGuard')+' · BrandGuard';

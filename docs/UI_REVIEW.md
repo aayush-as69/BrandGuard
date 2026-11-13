@@ -10,7 +10,7 @@ The spec describes some screens for features the backend does not have. They wer
 |---|---|---|
 | 12 Rewrite: Minimal / Balanced / Full, with validation badges | The engine produces one suggested fix per finding (a short span replacement). There are no three strengths and no rewrite validator. | Kept one proposed fix, shown as **Original → Proposed** with a diff. Not invented. |
 | 16 Guideline editor: versions, draft/publish, compare, rollback | On this branch rules were edited in place with no version store. | Edit and delete use in-page dialogs with consequences. Versioning was added afterwards on `feature/guideline-versioning` (draft, preview, publish, compare, rollback, audit). |
-| 19 Benchmark: precision / recall, before / after | No benchmark code, endpoint or data exists. | No Benchmark screen was added. |
+| 19 Benchmark: precision / recall, before / after | No benchmark code, endpoint or data existed on this branch. | Added on `feature/benchmark` (admin only): labelled cases, runs, precision/recall, per-rule accuracy, before/after comparison with the knowledge-base changes that explain it, and an "Add to glossary" fix loop. Rule checks only, no AI call. |
 | 14 Image review with bounding boxes and measured distances | The image file is never stored; only alt text and a text/background colour pair are submitted. Logo clear space is not measured. | Contrast is shown as measured vs required with the colour pair. Overlays are not possible without storing the image. |
 | 13 Diff with "protected facts" | The diff is span-level; protected facts are not tracked. | Original / Proposed with removed and added text. |
 
@@ -95,9 +95,9 @@ Failures found along the way and fixed:
 
 ## Known UI limitations
 
-- Benchmark, three-strength rewrites, guideline versioning (create / publish / compare / rollback) and protected-fact diffs are **not implemented**, because the backend does not provide them. See the first table.
+- Three-strength rewrites and protected-fact diffs are **not implemented** yet. Guideline versioning is on `feature/guideline-versioning` and the benchmark on `feature/benchmark`. See the first table.
 - Image review shows alt text and measured contrast only. Bounding boxes, palette samples and clear-space measurements need the image to be stored and analysed server-side.
-- The dashboard has no approval-rate or benchmark-health metric, since neither is computed by the API.
+- The dashboard has no approval-rate or benchmark-health metric yet; the benchmark now exists, so a health tile can be added.
 - No breadcrumbs; navigation is flat (four sections), and the workspace has an "← All content" link.
 - Dark theme only. Screen-reader and real-device testing not done. Cross-browser testing covers Chromium only.
 - Success toasts disappear after about four seconds; they also appear in some of the screenshots.

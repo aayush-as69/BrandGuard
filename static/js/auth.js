@@ -37,7 +37,8 @@ function afterLogin(){
   // Insights are about the guidelines, for the people who own them (not for authors).
   const noInsights=ME.role==='creator';
   document.querySelector('#nav [data-tab=insights]').classList.toggle('hidden',noInsights);
-  if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights')||(TAB==='users'&&ME.role!=='admin'))TAB='content';
+  if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights')||(TAB==='users'&&ME.role!=='admin')||(TAB==='benchmark'&&ME.role!=='admin'))TAB='content';
+  document.querySelector('#nav [data-tab=benchmark]').classList.toggle('hidden',ME.role!=='admin');
   KBRULE=null;RV=null;RVCMP=null;markNav();LASTTAB=null;
   accountUI();return render()}
 let AUTH='demo',AICFG={enabled:false},DEMO={available:false,email:'',password:''};
@@ -53,6 +54,7 @@ function accountUI(){
   if(real&&ME)$('#acct-name').textContent=ME.name+' · '+ME.role+(ME.is_external?' (agency)':'');
   if(!(real&&ME))closeAcct();
   document.querySelector('#nav [data-tab=users]').classList.toggle('hidden',!(real&&ME&&ME.role==='admin'));
+  document.querySelector('#nav [data-tab=benchmark]').classList.toggle('hidden',!(ME&&ME.role==='admin'));
   const demoUser=!!(real&&ME&&DEMO.available&&String(ME.email||'').endsWith('@brewline.demo'));
   $('#acct-role-row').classList.toggle('hidden',!demoUser);
   $('#chpw').classList.toggle('hidden',demoUser);$('#mfa').classList.toggle('hidden',demoUser);  // shared demo accounts: nothing to lock others out with

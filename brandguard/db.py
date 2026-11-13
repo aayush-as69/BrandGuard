@@ -225,6 +225,26 @@ def _m7_rule_versions(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX idx_rule_versions_published ON rule_versions(rule_code) WHERE status='published'")
 
 
+def _m8_benchmark(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE benchmark_cases(
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      images TEXT NOT NULL DEFAULT '[]',
+      expected TEXT NOT NULL DEFAULT '[]',
+      created_by INTEGER,
+      created_at TEXT NOT NULL)""")
+    conn.execute("""CREATE TABLE benchmark_runs(
+      id INTEGER PRIMARY KEY,
+      label TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      per_rule TEXT NOT NULL,
+      per_case TEXT NOT NULL,
+      snapshot TEXT NOT NULL)""")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
@@ -232,6 +252,7 @@ MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
     (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
     (7, "guideline rule version history", _m7_rule_versions),
+    (8, "accuracy benchmark cases and runs", _m8_benchmark),
 ]
 
 

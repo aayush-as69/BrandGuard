@@ -285,6 +285,14 @@ details[open]>summary{margin-bottom:var(--s2)}
 .rv-row{display:flex;justify-content:space-between;gap:var(--s4);align-items:flex-start;padding:var(--s3) 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .rv-row:last-child{border-bottom:0}
 .rv-text{margin-top:var(--s1);color:var(--muted);max-width:90ch}
+.bm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--s4);margin-top:var(--s3)}
+.bm-metric{display:grid;gap:var(--s1);padding:var(--s4);border:1px solid var(--border);border-radius:var(--r-md);background:var(--sunk)}
+.bm-metric b{font-size:36px;line-height:1.1;font-weight:600;letter-spacing:-.02em}
+.bm-table{max-width:100%}
+.bm-table th[scope=row]{color:var(--text);font-size:var(--fs-label);text-transform:none;letter-spacing:0;font-weight:600}
+.bm-delta td,.bm-delta th{border-bottom:0}
+.bm-issue{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;font-size:var(--fs-label)}
+.bm-body{overflow-wrap:anywhere}
 /* ------------------------------------------------------------------ insights */
 .insight{display:grid;gap:var(--s2);padding:var(--s4);border:1px solid var(--border);border-radius:var(--r-md);background:var(--sunk)}
 .insight-head{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap}

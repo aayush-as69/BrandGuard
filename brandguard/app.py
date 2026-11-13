@@ -23,6 +23,7 @@ from . import throttle
 from . import totp
 from . import vault
 from . import versions as rv
+from . import benchmark as bm
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -718,6 +719,69 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         wf.audit(c, None, user["id"], "rule_rolled_back", f"{code}: v{target} republished as v{n}")
         c.commit()
         return jsonify(version=n)
+
+    # ------------------------------------------------ accuracy benchmark (admin only)
+    def bench_admin() -> dict:
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can use the benchmark")
+        return user
+
+    @app.get("/api/benchmark")
+    def benchmark_overview():
+        bench_admin()
+        c = conn()
+        return jsonify(cases=bm.list_cases(c), runs=bm.list_runs(c))
+
+    @app.post("/api/benchmark/cases")
+    def benchmark_add_cases():
+        user, body, c = bench_admin(), payload(), conn()
+        n = bm.add_cases(c, user["id"], body.get("cases"))
+        wf.audit(c, None, user["id"], "benchmark_cases_added", f"{n} case(s)")
+        c.commit()
+        return jsonify(added=n)
+
+    @app.post("/api/benchmark/seed")
+    def benchmark_seed():
+        user, c = bench_admin(), conn()
+        demo = json.loads((ROOT / "seed" / "benchmark.json").read_text(encoding="utf-8"))
+        have = {r["title"] for r in c.execute("SELECT title FROM benchmark_cases")}
+        fresh = [x for x in demo if x["title"] not in have]
+        n = bm.add_cases(c, user["id"], fresh) if fresh else 0
+        wf.audit(c, None, user["id"], "benchmark_seeded", f"{n} demo case(s)")
+        c.commit()
+        return jsonify(added=n)
+
+    @app.delete("/api/benchmark/cases/<int:case_id>")
+    def benchmark_delete_case(case_id: int):
+        user, c = bench_admin(), conn()
+        bm.delete_case(c, case_id)
+        wf.audit(c, None, user["id"], "benchmark_case_deleted", str(case_id))
+        c.commit()
+        return jsonify(ok=True)
+
+    @app.post("/api/benchmark/run")
+    def benchmark_run():
+        user, body, c = bench_admin(), payload(), conn()
+        run = bm.run(c, user["id"], body.get("label", ""))
+        s = run["summary"]
+        wf.audit(c, None, user["id"], "benchmark_run", f"run {run['id']}: {s['cases']} cases, precision {s['precision']}, recall {s['recall']}")
+        c.commit()
+        return jsonify(run)
+
+    @app.get("/api/benchmark/runs/<int:run_id>")
+    def benchmark_get_run(run_id: int):
+        bench_admin()
+        return jsonify(bm.get_run(conn(), run_id))
+
+    @app.get("/api/benchmark/compare")
+    def benchmark_compare():
+        bench_admin()
+        try:
+            a, b = int(request.args.get("before", "")), int(request.args.get("after", ""))
+        except ValueError:
+            raise ValueError("Choose two runs to compare") from None
+        return jsonify(bm.compare(conn(), a, b))
 
     @app.post("/api/kb/seed")
     def kb_seed():

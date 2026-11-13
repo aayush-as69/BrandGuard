@@ -1,0 +1,298 @@
+[
+ {
+  "title": "Clean launch note",
+  "body": "Hello friend,\n\nOur Signature Blend 250g pouch is priced at ₹449. It launches on 15 December 2026.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Clean origin note",
+  "body": "Signature Blend beans are sourced from estates in Coorg and Chikmagalur. It is a medium-dark roast.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Clean short post",
+  "body": "Fresh roast, just for you. Pay with UPI or read the FAQ.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Wrong price",
+  "body": "The 250g pouch is only ₹399 this week.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "F-01",
+    "text": "₹399"
+   }
+  ]
+ },
+ {
+  "title": "Correct price",
+  "body": "The 250g pouch is ₹449.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Wrong launch date",
+  "body": "Launching 1 December 2026.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "F-02",
+    "text": "1 December 2026"
+   }
+  ]
+ },
+ {
+  "title": "Correct launch date",
+  "body": "Launching 15 December 2026.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Wrong roast",
+  "body": "A light roast made for slow mornings.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "F-04",
+    "text": "light roast"
+   }
+  ]
+ },
+ {
+  "title": "Wrong origin",
+  "body": "Our beans are sourced from estates in Kenya.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "F-03",
+    "text": "Kenya"
+   }
+  ]
+ },
+ {
+  "title": "Ranking claim",
+  "body": "India's #1 coffee is finally here.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-04",
+    "text": "India's #1 coffee"
+   }
+  ]
+ },
+ {
+  "title": "Superlative claim",
+  "body": "The best coffee you will taste this year.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-04",
+    "text": "The best"
+   }
+  ]
+ },
+ {
+  "title": "Too many exclamation marks",
+  "body": "Wow!!! Amazing!!!",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-02",
+    "text": "!!!"
+   },
+   {
+    "source_id": "G-02",
+    "text": "!!!"
+   }
+  ]
+ },
+ {
+  "title": "Shouting in capitals",
+  "body": "BUY NOW while stocks last",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-02",
+    "text": "BUY"
+   },
+   {
+    "source_id": "G-02",
+    "text": "NOW"
+   }
+  ]
+ },
+ {
+  "title": "Allowed acronyms",
+  "body": "Pay with UPI or see the FAQ for GST details.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Listed slang",
+  "body": "Hey bhai, try the new blend.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-01",
+    "text": "bhai"
+   }
+  ]
+ },
+ {
+  "title": "Banned word: cheap",
+  "body": "A cheap way to start your morning.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-03",
+    "text": "cheap"
+   }
+  ]
+ },
+ {
+  "title": "Banned word: addictive",
+  "body": "You will find it addictive.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-07",
+    "text": "addictive"
+   }
+  ]
+ },
+ {
+  "title": "Unlisted slang: lit",
+  "body": "This blend is lit, honestly.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-01",
+    "text": "lit"
+   }
+  ]
+ },
+ {
+  "title": "Unlisted slang: dope",
+  "body": "Dope coffee for your desk.",
+  "images": [],
+  "expected": [
+   {
+    "source_id": "G-01",
+    "text": "dope"
+   }
+  ]
+ },
+ {
+  "title": "Negated banned word",
+  "body": "Customers never call it cheap. They say it is worth every rupee.",
+  "images": [],
+  "expected": []
+ },
+ {
+  "title": "Missing alt text",
+  "body": "Hello friend, meet the new blend.",
+  "images": [
+   {
+    "name": "hero.png",
+    "alt": "",
+    "text_color": "#000000",
+    "bg_color": "#FFFFFF"
+   }
+  ],
+  "expected": [
+   {
+    "source_id": "G-06",
+    "text": "hero.png"
+   }
+  ]
+ },
+ {
+  "title": "Low-contrast image text",
+  "body": "Hello friend, meet the new blend.",
+  "images": [
+   {
+    "name": "hero.png",
+    "alt": "Signature Blend pouch on a table",
+    "text_color": "#9A9A9A",
+    "bg_color": "#FFFFFF"
+   }
+  ],
+  "expected": [
+   {
+    "source_id": "G-06",
+    "text": "hero.png"
+   }
+  ]
+ },
+ {
+  "title": "Good image",
+  "body": "Hello friend, meet the new blend.",
+  "images": [
+   {
+    "name": "hero.png",
+    "alt": "Signature Blend pouch on a table",
+    "text_color": "#111111",
+    "bg_color": "#FFFFFF"
+   }
+  ],
+  "expected": []
+ },
+ {
+  "title": "Full launch email (several issues)",
+  "body": "Subject: Meet Brewline Signature Blend\n\nHi there,\n\nDude, our new Signature Blend is insanely good, you'll be hooked from the first sip!!!\n\nIndia's #1 coffee is finally here. Grab a 250g pouch for just ₹399, a cheap price for beans sourced from Coorg and Chikmagalur.\n\nLaunching on 1 December 2026, it is a light roast made for slow mornings.\n\nPre-order today and taste the difference.\n\nWarmly,\nNeha, Brewline Coffee team",
+  "images": [
+   {
+    "name": "hero.png",
+    "alt": "",
+    "text_color": "#9A9A9A",
+    "bg_color": "#FFFFFF"
+   }
+  ],
+  "expected": [
+   {
+    "source_id": "G-01",
+    "text": "Dude"
+   },
+   {
+    "source_id": "G-01",
+    "text": "insanely good"
+   },
+   {
+    "source_id": "G-02",
+    "text": "!!!"
+   },
+   {
+    "source_id": "G-04",
+    "text": "India's #1 coffee"
+   },
+   {
+    "source_id": "F-01",
+    "text": "₹399"
+   },
+   {
+    "source_id": "G-03",
+    "text": "cheap"
+   },
+   {
+    "source_id": "F-02",
+    "text": "1 December 2026"
+   },
+   {
+    "source_id": "F-04",
+    "text": "light roast"
+   },
+   {
+    "source_id": "G-06",
+    "text": "hero.png"
+   },
+   {
+    "source_id": "G-06",
+    "text": "hero.png"
+   }
+  ]
+ }
+]
