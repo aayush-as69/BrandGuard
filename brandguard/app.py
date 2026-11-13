@@ -22,6 +22,7 @@ from . import record
 from . import throttle
 from . import totp
 from . import vault
+from . import versions as rv
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -647,13 +648,76 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         c = conn()
         if request.method == "PATCH":
             patch = payload()
+            if kind == "rules":
+                rv.sync(c, key, user["id"])      # keep what was live before this edit in the history
             update(c, key, patch)
+            if kind == "rules":
+                rv.sync(c, key, user["id"], "Edited directly in the knowledge base")
             wf.audit(c, None, user["id"], "kb_edited", f"{kind}/{key}: {', '.join(sorted(patch))}")
         else:
             delete(c, key)
+            if kind == "rules":
+                rv.forget(c, key)
             wf.audit(c, None, user["id"], "kb_deleted", f"{kind}/{key}")
         c.commit()
         return jsonify(ok=True)
+
+    # ------------------------------------------------ guideline rule versions (admin only)
+    def rule_admin() -> dict:
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can manage guideline versions")
+        return user
+
+    @app.get("/api/kb/rules/<code>/versions")
+    def rule_versions(code: str):
+        rule_admin()
+        return jsonify(rv.list_versions(conn(), code))
+
+    @app.get("/api/kb/rules/<code>/compare")
+    def rule_compare(code: str):
+        rule_admin()
+        try:
+            a, b = int(request.args.get("from", "")), int(request.args.get("to", ""))
+        except ValueError:
+            raise ValueError("Choose two versions to compare") from None
+        return jsonify(rv.compare(conn(), code, a, b))
+
+    @app.post("/api/kb/rules/<code>/draft")
+    def rule_save_draft(code: str):
+        user, body, c = rule_admin(), payload(), conn()
+        n = rv.save_draft(c, code, user["id"], body.get("text"), body.get("title"), body.get("note"))
+        wf.audit(c, None, user["id"], "rule_draft_saved", f"{code}: draft v{n}")
+        c.commit()
+        return jsonify(version=n)
+
+    @app.delete("/api/kb/rules/<code>/draft")
+    def rule_discard_draft(code: str):
+        user, c = rule_admin(), conn()
+        rv.discard_draft(c, code)
+        wf.audit(c, None, user["id"], "rule_draft_discarded", code)
+        c.commit()
+        return jsonify(ok=True)
+
+    @app.post("/api/kb/rules/<code>/publish")
+    def rule_publish(code: str):
+        user, c = rule_admin(), conn()
+        n = rv.publish(c, code, user["id"])
+        wf.audit(c, None, user["id"], "rule_published", f"{code}: v{n} is now live")
+        c.commit()
+        return jsonify(version=n)
+
+    @app.post("/api/kb/rules/<code>/rollback")
+    def rule_rollback(code: str):
+        user, body, c = rule_admin(), payload(), conn()
+        try:
+            target = int(body.get("version"))
+        except (TypeError, ValueError):
+            raise ValueError("Choose which version to roll back to") from None
+        n = rv.rollback(c, code, target, user["id"])
+        wf.audit(c, None, user["id"], "rule_rolled_back", f"{code}: v{target} republished as v{n}")
+        c.commit()
+        return jsonify(version=n)
 
     @app.post("/api/kb/seed")
     def kb_seed():

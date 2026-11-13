@@ -29,7 +29,7 @@ $('#demo-role').onchange=e=>run(async()=>{
   catch(err){accountUI();throw err}
   ME=await api('/api/me');CUR=null;DETAIL=null;SEL=null;KBDATA=null;TAB='content';afterLogin()});
 function markNav(){document.querySelectorAll('#nav button').forEach(x=>{if(x.dataset.tab===TAB)x.setAttribute('aria-current','page');else x.removeAttribute('aria-current')})}
-document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;CUR=null;DETAIL=null;SEL=null;markNav();render().then(focusMain)});
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;CUR=null;DETAIL=null;SEL=null;KBRULE=null;RV=null;RVCMP=null;markNav();render().then(focusMain)});
 function afterLogin(){
   $('#nav').classList.remove('hidden');
   // Agency users cannot browse brand material, so they get no Knowledge base tab.
@@ -38,7 +38,7 @@ function afterLogin(){
   const noInsights=ME.role==='creator';
   document.querySelector('#nav [data-tab=insights]').classList.toggle('hidden',noInsights);
   if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights')||(TAB==='users'&&ME.role!=='admin'))TAB='content';
-  markNav();LASTTAB=null;
+  KBRULE=null;RV=null;RVCMP=null;markNav();LASTTAB=null;
   accountUI();return render()}
 let AUTH='demo',AICFG={enabled:false},DEMO={available:false,email:'',password:''};
 const aiBox=id=>AICFG.enabled?`<div class="notice info"><label class="row"><input type="checkbox" id="${id}" checked> <span>Use AI to judge tone <span class="muted">(sends this text to ${esc(AICFG.provider||'the AI provider')})</span></span></label></div><p class="small muted">${esc(AICFG.notice||'')}</p>`:'';

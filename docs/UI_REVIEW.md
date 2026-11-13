@@ -9,7 +9,7 @@ The spec describes some screens for features the backend does not have. They wer
 | Spec section | Reality in this repo | Decision |
 |---|---|---|
 | 12 Rewrite: Minimal / Balanced / Full, with validation badges | The engine produces one suggested fix per finding (a short span replacement). There are no three strengths and no rewrite validator. | Kept one proposed fix, shown as **Original → Proposed** with a diff. Not invented. |
-| 16 Guideline editor: versions, draft/publish, compare, rollback | Rules are imported and edited in place. There is no guideline version store. | Edit and delete now use in-page dialogs with consequences. Versioning needs backend work first. |
+| 16 Guideline editor: versions, draft/publish, compare, rollback | On this branch rules were edited in place with no version store. | Edit and delete use in-page dialogs with consequences. Versioning was added afterwards on `feature/guideline-versioning` (draft, preview, publish, compare, rollback, audit). |
 | 19 Benchmark: precision / recall, before / after | No benchmark code, endpoint or data exists. | No Benchmark screen was added. |
 | 14 Image review with bounding boxes and measured distances | The image file is never stored; only alt text and a text/background colour pair are submitted. Logo clear space is not measured. | Contrast is shown as measured vs required with the colour pair. Overlays are not possible without storing the image. |
 | 13 Diff with "protected facts" | The diff is span-level; protected facts are not tracked. | Original / Proposed with removed and added text. |

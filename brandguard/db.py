@@ -207,12 +207,31 @@ def _m6_login_failures(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_login_failures_key ON login_failures(key, at)")
 
 
+def _m7_rule_versions(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE rule_versions(
+      id INTEGER PRIMARY KEY,
+      rule_code TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('draft','published','archived')),
+      note TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      published_at TEXT,
+      UNIQUE(rule_code, version))""")
+    # at most one draft and exactly one published version per rule
+    conn.execute("CREATE UNIQUE INDEX idx_rule_versions_draft ON rule_versions(rule_code) WHERE status='draft'")
+    conn.execute("CREATE UNIQUE INDEX idx_rule_versions_published ON rule_versions(rule_code) WHERE status='published'")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
     (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
     (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
+    (7, "guideline rule version history", _m7_rule_versions),
 ]
 
 
