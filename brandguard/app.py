@@ -24,6 +24,7 @@ from . import totp
 from . import vault
 from . import versions as rv
 from . import benchmark as bm
+from . import rewrite as rw
 from . import kb as kbm
 from . import llm
 from . import workflow as wf
@@ -928,6 +929,15 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if content["status"] == "approved":
             raise Forbidden("Approved content is locked")
         return jsonify(wf.run_review(conn(), cid, judge_factory, ai_mode(request.get_json(silent=True) or {})))
+
+    @app.get("/api/content/<int:cid>/rewrites")
+    def content_rewrites(cid: int):
+        """Minimal / Balanced / Full rewrites. Options that fail their safety checks come back hidden, with no text."""
+        return jsonify(rw.build(conn(), me(), cid))
+
+    @app.post("/api/content/<int:cid>/rewrites/<strength>/apply")
+    def content_rewrite_apply(cid: int, strength: str):
+        return jsonify(rw.apply(conn(), me(), cid, strength, judge_factory))
 
     @app.post("/api/findings/<int:fid>/decide")
     def finding_decide(fid: int):

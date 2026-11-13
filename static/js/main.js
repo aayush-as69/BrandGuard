@@ -1,6 +1,6 @@
 /* Click and key dispatch (no inline handlers, so the CSP can forbid inline script), then start */
 /* One delegated listener replaces inline handlers, so the page can run under a CSP with no inline script. */
-const ACTIONS={render,focusSignin,demoLogin,demoFill,pick,goLogin,goHome,brandHome,togglePw,goTab,moreContent,tourStart,tourStep,tourDo,tourClose,act,approve,addImgRow,comment,createContent,decide,decideDismiss,decideEdit,doImport,kbDel,kbEdit,kbTab,kbClear,bmRun,bmSeed,bmDelCase,bmAddCase,bmAddTerm,ruleOpen,ruleBack,ruleCompare,rulePublish,ruleDiscard,ruleRollback,loadDemo,openContent,closeContent,removeRow,reqChanges,revise,seed,showNew,toggle,toDecision};
+const ACTIONS={render,focusSignin,demoLogin,demoFill,pick,goLogin,goHome,brandHome,togglePw,goTab,moreContent,tourStart,tourStep,tourDo,tourClose,act,approve,addImgRow,comment,createContent,decide,decideDismiss,decideEdit,doImport,kbDel,kbEdit,kbTab,kbClear,bmRun,bmSeed,bmDelCase,bmAddCase,bmAddTerm,ruleOpen,ruleBack,ruleCompare,rulePublish,ruleDiscard,ruleRollback,rwTab,rwView,rwApply,loadDemo,openContent,closeContent,removeRow,reqChanges,revise,seed,showNew,toggle,toDecision};
 const ELEMENT_ACTIONS=new Set(['removeRow','kbEdit','kbDel','ruleOpen','bmDelCase']);
 function dispatch(t){
   const fn=ACTIONS[t.dataset.c];if(!fn)return;

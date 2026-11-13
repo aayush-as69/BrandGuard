@@ -93,7 +93,7 @@ async function loadDetail(id,rid){
     loadDetail.t=setTimeout(()=>{if(CUR===id)loadDetail(id).catch(()=>{})},2000);
   else loadDetail.n=0;
   if(SEL===null||!fresh.findings.some(f=>f.id===SEL)){const first=fresh.findings.find(f=>f.decision==='open')||fresh.findings[0];SEL=first?first.id:null}
-  if(!same)paintDetail();
+  if(!same){paintDetail();loadRewrites(id,fresh)}
 }
 function keepInputs(draw){ // redrawing for a selection change must not lose what someone is typing
   const get=s=>{const e=$(s);return e?e.value:null};
@@ -129,7 +129,7 @@ function paintDetail(){keepInputs(()=>{
          <div class="stack"><textarea id="rb" rows="8" aria-label="Edit the content text">${esc(d.body)}</textarea>
          ${aiBox('rai')}<div><button class="btn" type="button" data-c="revise">Save as new version</button></div></div></details>`:''}</section>
      ${d.images.length?imagesCard(d):''}
-     <div class="ws-side">${findingsCard(d)}${approvalCard(d)}</div>
+     <div class="ws-side">${findingsCard(d)}${rewriteCard(d)}${approvalCard(d)}</div>
      ${claimsCard(d)}${discussionCard(d)}${versionsCard(d)}
    </div>`})}
 
@@ -296,3 +296,50 @@ const comment=()=>run(async()=>{const b=$('#cm').value;
   await api('/api/content/'+CUR+'/comments',{json:{body:b}});toast('Comment posted.');await renderContent();const n=$('#cm');if(n)n.focus()});
 const revise=()=>run(async()=>{await api('/api/content/'+CUR+'/revise',{json:{body:$('#rb').value,images:DETAIL.images,use_ai:useAI('rai')}});
   toast('Saved as a new version and re-reviewed.');SEL=null;await renderContent()});
+
+
+/* ------------------------------------------------------------ rewrite options: three strengths, each checked before it is shown */
+let RW=null; // {id, version, data, sel, view}
+const RW_VIEWS=[['original','Original'],['proposed','Proposed'],['diff','Changes']];
+function loadRewrites(id,d){
+  const open=d.findings.some(f=>f.decision==='open');
+  if(!d.permissions.can_decide||d.content.status==='approved'||!open){RW=null;return}
+  api('/api/content/'+id+'/rewrites').then(data=>{
+    if(CUR!==id||!DETAIL||DETAIL.content.current_version!==data.version)return;
+    const keep=RW&&RW.id===id&&RW.version===data.version?RW:null;
+    const first=data.options.find(o=>o.status==='ok');
+    RW={id,version:data.version,data,sel:keep&&data.options.some(o=>o.strength===keep.sel&&o.status==='ok')?keep.sel:(first?first.strength:null),view:keep?keep.view:'proposed'};
+    paintDetail()}).catch(()=>{RW=null})}
+function rwBody(o,view){
+  const wrap=(label,html)=>`<div class="rw-text" tabindex="0" role="region" aria-label="${label}">${html}</div>`;
+  if(view==='original')return wrap('Original text',esc(DETAIL.body));
+  if(view==='diff')return wrap('Changes shown in the text',o.diff.map(x=>x.op==='same'?esc(x.text):x.op==='removed'?`<del>${esc(x.text)}</del>`:`<ins>${esc(x.text)}</ins>`).join(''));
+  return wrap('Proposed text',esc(o.body))}
+function rewriteCard(d){
+  if(!RW||RW.id!==d.content.id||RW.version!==d.content.current_version)return '';
+  const opts=RW.data.options,ok=opts.filter(o=>o.status==='ok'),hidden=opts.filter(o=>o.status==='hidden').length;
+  if(!ok.length&&!hidden)return '';
+  const head=`<div class="card-head"><h2 id="rw-h">Rewrite options</h2></div>`;
+  if(!ok.length)return `<section class="card" aria-labelledby="rw-h">${head}<div class="notice info"><span aria-hidden="true">i</span><span>${plural(hidden,'rewrite option')} did not pass the safety checks and ${hidden===1?'is':'are'} not offered. Decide each finding yourself below.</span></div></section>`;
+  const o=ok.find(x=>x.strength===RW.sel)||ok[0],p=d.permissions;
+  const tabs=ok.map(x=>`<button type="button" role="tab" id="rwt-${x.strength}" aria-selected="${x===o}" aria-controls="rwp" data-c="rwTab" data-a='["${x.strength}"]'>${esc(x.label)}${x.same_as?'':` <span class="muted">${x.changes.length}</span>`}</button>`).join('');
+  const views=RW_VIEWS.map(([k,l])=>`<button type="button" class="btn sm${RW.view===k?' on':''}" aria-pressed="${RW.view===k}" data-c="rwView" data-a='["${k}"]'>${l}</button>`).join('');
+  const checks=o.checks.map(c=>`<li class="chip ${c.ok?'success':'danger'}"><span aria-hidden="true">${c.ok?'✓':'✕'}</span> ${esc(c.label)}</li>`).join('');
+  const changes=o.changes.map(c=>`<li><b>${esc(c.source_id)}</b> <del>${esc(c.from)}</del> → <ins>${esc(c.to)}</ins></li>`).join('');
+  const same=o.same_as?`<p class="small muted">Same changes as ${esc(cap(o.same_as))}. Nothing extra is added at this strength.</p>`:'';
+  return `<section class="card" aria-labelledby="rw-h">${head}
+    <p class="small muted">Each option applies fixes BrandGuard already proposed. It is checked again against the approved facts before you see it. Nothing changes until you apply one.</p>
+    <div class="rw-tabs" role="tablist" aria-label="Rewrite strength">${tabs}</div>
+    <div id="rwp" role="tabpanel" aria-labelledby="rwt-${o.strength}"><p class="small">${esc(o.summary)} <b>${plural(o.changes.length,'change')}.</b></p>${same}
+      <div class="rw-views" role="group" aria-label="View">${views}</div>${rwBody(o,RW.view)}
+      <details class="u-mt"><summary>What changes (${o.changes.length})</summary><ul class="timeline">${changes}</ul></details>
+      <div class="f-step"><span class="f-label">Safety checks</span><ul class="rw-checks">${checks}</ul></div>
+      ${p.can_decide?`<div class="decide"><button class="btn good" type="button" data-c="rwApply" data-a='["${o.strength}"]'>Apply ${esc(o.label.toLowerCase())} rewrite</button></div>`:''}</div>
+    ${hidden?`<p class="small muted u-mt">${plural(hidden,'other option')} did not pass the safety checks and ${hidden===1?'is':'are'} not offered.</p>`:''}</section>`}
+function rwTab(k){RW.sel=k;paintDetail();const t=document.getElementById('rwt-'+k);if(t)t.focus()}
+function rwView(k){RW.view=k;paintDetail()}
+function rwApply(k){const o=RW.data.options.find(x=>x.strength===k);
+  return askDialog({title:`Apply the ${o.label.toLowerCase()} rewrite?`,note:'This creates a new version of the content with these changes.',
+    consequence:`${plural(o.changes.length,'fix','fixes')} will be applied and marked accepted. You can still edit the new version, and the earlier version stays in the history.`,ok:'Apply rewrite',
+    onSubmit:async()=>{await api('/api/content/'+CUR+'/rewrites/'+k+'/apply',{method:'POST',json:{}})}})
+    .then(async done=>{if(done){toast('Rewrite applied as a new version.');RW=null;await loadDetail(CUR,RID)}})}
