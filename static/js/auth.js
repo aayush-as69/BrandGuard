@@ -32,6 +32,7 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{TAB=b.dataset
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));render()});
 function afterLogin(){
   $('#nav').classList.remove('hidden');
+  $('#global-search').classList.remove('hidden');
   // Agency users cannot browse brand material, so they get no Knowledge base tab.
   document.querySelector('#nav [data-tab=kb]').classList.toggle('hidden',!!ME.is_external);
   // Insights are about the guidelines, for the people who own them (not for authors).
@@ -46,6 +47,7 @@ const aiBox=id=>AICFG.enabled?`<label class="u-blk-m8 small"><input type="checkb
 const useAI=id=>{const b=document.getElementById(id);return b?b.checked:true};
 function accountUI(){
   const real=AUTH==='accounts';
+  $('#global-search')?.classList.toggle('hidden',!ME);
   $('#who').classList.toggle('hidden',real);document.querySelector('label[for=who]').classList.toggle('hidden',real);
   $('#pass').classList.toggle('hidden',real || !!ME);
   $('#hdr-signin').classList.toggle('hidden',!(real&&!ME));$('#acct').classList.toggle('hidden',!(real&&ME));
