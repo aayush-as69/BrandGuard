@@ -29,6 +29,7 @@ from . import totp
 from . import vault
 from . import kb as kbm
 from . import llm
+from . import metrics
 from . import workflow as wf
 from .errors import Forbidden, NotFound, RateLimited
 
@@ -252,6 +253,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def guard_origin():
         """Refuse cross-site writes: a state-changing request must come from this site."""
         g.t0 = time.perf_counter()
+        g.request_id = secrets.token_hex(8)
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if request.headers.get("Sec-Fetch-Site") == "cross-site":
                 return jsonify(error="Cross-site request refused"), 403
@@ -283,7 +285,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             print(json.dumps({
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "method": request.method, "path": request.path,
                 "status": resp.status_code, "user": session.get("uid"),
+                "request_id": g.get("request_id", ""),
                 "ms": round((time.perf_counter() - g.get("t0", time.perf_counter())) * 1000, 1)}), flush=True)
+        if g.get("request_id"):
+            resp.headers["X-Request-ID"] = g.request_id
         return resp
 
     @app.after_request
@@ -303,43 +308,43 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.errorhandler(AuthError)
     def _auth(e):
-        return jsonify(error=str(e)), 401
+        return jsonify(error=str(e), request_id=g.get("request_id", "")), 401
 
     @app.errorhandler(Forbidden)
     def _perm(e):
-        return jsonify(error=str(e)), 403
+        return jsonify(error=str(e), request_id=g.get("request_id", "")), 403
 
     @app.errorhandler(NotFound)
     def _missing(e):
-        return jsonify(error=str(e) or "Not found"), 404
+        return jsonify(error=str(e) or "Not found", request_id=g.get("request_id", "")), 404
 
     @app.errorhandler(RateLimited)
     def _limited(e):
-        return jsonify(error=str(e)), 429
+        return jsonify(error=str(e), request_id=g.get("request_id", "")), 429
 
     @app.errorhandler(HTTPException)
     def _http(e):
         if not request.path.startswith("/api/"):
             return e
         msg = "That file is too large (limit 10 MB)" if e.code == 413 else (e.description or e.name)
-        return jsonify(error=msg), e.code
+        return jsonify(error=msg, request_id=g.get("request_id", "")), e.code
 
     @app.errorhandler(Exception)
     def _unexpected(e):
         # A genuine bug (KeyError, TypeError, ...) is a 500 that is logged, never dressed up as a 404.
         app.logger.exception("Unhandled error on %s %s", request.method, request.path)
-        return jsonify(error="Something went wrong on the server."), 500
+        return jsonify(error="Something went wrong on the server.", request_id=g.get("request_id", "")), 500
 
     @app.errorhandler(ValueError)
     def _bad(e):
-        return jsonify(error=str(e)), 400
+        return jsonify(error=str(e), request_id=g.get("request_id", "")), 400
 
     @app.errorhandler(sqlite3.IntegrityError)
     def _integrity(e):
         app.logger.warning("integrity error on %s %s: %s", request.method, request.path, e)  # detail stays on the server
         if "users.email" in str(e) or "idx_users_email" in str(e):
             return jsonify(error="That email address is already in use"), 400
-        return jsonify(error="That change conflicts with existing data and was not saved"), 400
+        return jsonify(error="That change conflicts with existing data and was not saved", request_id=g.get("request_id", "")), 400
 
     # -------------------------------------------------------------------- pages
     @app.get("/")
@@ -963,6 +968,14 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         wf.audit(c, None, user["id"], "kb_learning_undone", out["summary"])
         c.commit()
         return jsonify({**out, **quality_payload(c)})
+
+    @app.get("/api/ops/metrics")
+    def ops_metrics():
+        """Admin-only operational dashboard. No prompt or content payloads are returned."""
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Admin access required")
+        return jsonify(metrics.dashboard(conn()))
 
     @app.get("/api/llm-log")
     def llm_log():

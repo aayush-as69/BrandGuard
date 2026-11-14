@@ -222,6 +222,18 @@ def _m7_quality(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_image_checks_user ON image_checks(user_id, id)")
 
 
+def _m8_ai_observability(conn: sqlite3.Connection) -> None:
+    """Add provider/request timing and verification counters to the AI audit log."""
+    for col in (
+        "request_id TEXT NOT NULL DEFAULT ''",
+        "provider TEXT NOT NULL DEFAULT ''",
+        "latency_ms REAL NOT NULL DEFAULT 0",
+        "accepted INTEGER NOT NULL DEFAULT 0",
+        "discarded INTEGER NOT NULL DEFAULT 0",
+    ):
+        conn.execute(f"ALTER TABLE llm_log ADD COLUMN {col}")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
@@ -229,6 +241,7 @@ MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
     (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
     (7, "benchmark runs, versioned knowledge-base changes, measured image checks", _m7_quality),
+    (8, "AI request observability metadata and verification counters", _m8_ai_observability),
 ]
 
 
