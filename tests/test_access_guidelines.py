@@ -47,7 +47,8 @@ def test_agency_sees_public_rules_only(tiers, login):
 def test_internal_creator_sees_internal_but_not_confidential(tiers, login):
     r = login(RAHUL)
     assert _finding(r, BODY, "Y-01")[1]["restricted"] is False
-    assert _finding(r, BODY, "Z-01")[1]["restricted"] is True\n    assert _finding(r, BODY, "W-01")[1]["restricted"] is True
+    assert _finding(r, BODY, "Z-01")[1]["restricted"] is True
+    assert _finding(r, BODY, "W-01")[1]["restricted"] is True
 
 
 def test_manager_sees_everything(tiers, login):
