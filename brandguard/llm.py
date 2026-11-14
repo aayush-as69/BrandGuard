@@ -22,6 +22,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid
 from typing import Callable, Optional
 
 from . import retrieve
@@ -270,16 +271,24 @@ def make_judge(
             return [], f"skipped: not sent to the AI ({why})"
         user = f"BRAND RULES\n{rules_text}\n\n<content>\n{sent}\n</content>"
         purge_log(conn)
+        request_id = uuid.uuid4().hex
+        started = time.perf_counter()
         log_id = conn.execute(
-            "INSERT INTO llm_log(content_id, version, model, payload, content_sha256, chars, rules, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO llm_log(content_id, version, model, payload, content_sha256, chars, rules, status, created_at, "
+            "request_id, provider, latency_ms, accepted, discarded) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (content_id, version, model, system_and_user(user) if log_mode() == "full" else "",
-             hashlib.sha256(body.encode("utf-8")).hexdigest(), len(body), json.dumps(codes), "sent", now()),
+             hashlib.sha256(body.encode("utf-8")).hexdigest(), len(body), json.dumps(codes), "sent", now(),
+             request_id, provider(), 0, 0, 0),
         ).lastrowid
         conn.commit()
 
-        def outcome(status: str) -> None:
-            conn.execute("UPDATE llm_log SET status=? WHERE id=?", (status[:200], log_id))
+        def outcome(status: str, accepted: int = 0, discarded: int = 0) -> None:
+            latency = round((time.perf_counter() - started) * 1000, 1)
+            conn.execute(
+                "UPDATE llm_log SET status=?, latency_ms=?, accepted=?, discarded=? WHERE id=?",
+                (status[:200], latency, accepted, discarded, log_id),
+            )
             conn.commit()
 
         try:
@@ -309,7 +318,7 @@ def make_judge(
             except Exception:
                 continue  # malformed record: rejected by schema validation
         status = f"used {model}; {len(codes)} rules retrieved, {len(items)} suggestions returned"
-        outcome(status)
+        outcome(status, accepted=len(out), discarded=max(0, len(items) - len(out)))
         return out, status
 
     return judge

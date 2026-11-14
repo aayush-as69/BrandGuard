@@ -5,7 +5,11 @@ let QP=null;
 async function renderQuality(){
   const rid=++RID;let d;
   try{d=await api('/api/quality')}catch(e){if(rid!==RID)return;$('#main').innerHTML=`<div class="card"><h2>Quality</h2><p class="muted">${esc(e.message)}</p></div>`;return}
-  if(rid!==RID)return;QP=d;drawQuality(d);
+  if(rid!==RID)return;QP=d;
+  if(ME&&ME.role==='admin'){
+    try{d.ops=await api('/api/ops/metrics')}catch(_){d.ops=null}
+  }
+  drawQuality(d);
   clearTimeout(renderQuality.t);
   if(d.pending)renderQuality.t=setTimeout(()=>{if(TAB==='quality')renderQuality()},3000)}
 function drawQuality(d){
