@@ -39,5 +39,7 @@ shape, clear space and text contrast (see QUALITY.md). Measurements are stored p
 itself is not stored. The text colour is an estimate unless typed, so the author should confirm it. Alt text is
 still typed by the author, and BrandGuard does not recognise what a picture shows (wrong logo, wrong product); a vision model for that is future work.
 
+**Operational traceability.** API responses include a request ID and the same ID is emitted in structured JSON access logs. AI audit metadata also records provider and latency without storing prompts unless the explicit full-log setting is enabled.
+
 **Out of scope today:** forced multi-factor sign-in, encryption at rest by the app (use an encrypted volume), per-tenant isolation (one database serves one
 brand/organisation), an external job queue for AI checks (the in-process one is described in DEPLOYMENT.md). Report problems privately to the maintainer before opening a public issue.
