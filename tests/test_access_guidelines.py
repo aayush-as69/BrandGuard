@@ -14,7 +14,8 @@ def tiers(seeded, login):
     """One guideline per access level, each with one glossary term that triggers it."""
     ira = login(IRA)
     for level, code, term, text in (
-        ("restricted", "W-01", "Ember", RESTRICTED),\n        ("confidential", "Z-01", "Rivalbrew", SECRET),
+        ("restricted", "W-01", "Ember", RESTRICTED),
+        ("confidential", "Z-01", "Rivalbrew", SECRET),
         ("internal", "Y-01", "stalecoffee", "Internal note: never call our beans stalecoffee."),
         ("public", "X-01", "blandbean", "Public rule: do not call our beans blandbean."),
     ):
