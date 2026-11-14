@@ -19,7 +19,7 @@
     <button data-tab="quality" class="hidden">Quality</button>
     <button data-tab="users" class="hidden">Users</button>
   </nav>
-  <span class="sp"></span>
+  <span class="sp"></span>\n  <button class="btn hidden" id="global-search" type="button" data-c="searchOpen" aria-label="Search BrandGuard">Search ⌕</button>
   <button class="btn tour-only" data-c="tourStart" aria-label="Take the guided tour">Tour</button>
   <label class="small muted" for="who">Role</label>
   <input type="password" id="pass" class="hidden" placeholder="Passcode" aria-label="Passcode" autocomplete="off">
@@ -45,7 +45,7 @@
    <button class="btn" id="tour-nx" data-c="tourStep" data-a='[1]'>Next</button>
    <button class="btn" data-c="tourClose" aria-label="Close the tour">Close</button></div>
 </aside>
-<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>\n<div id="search-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="search-title"><div class="modal-card"><div class="row"><div><div class="section-kicker">SEARCH</div><h2 id="search-title">Find in BrandGuard</h2></div><button class="btn" data-c="searchClose">Close</button></div><input id="search-input" class="field" type="search" placeholder="Search reviews, rules, facts…" autocomplete="off"><div id="search-results" class="stack u-mt10"></div></div></div>
 
 <script src="/static/js/core.js"></script>
 <script src="/static/js/auth.js"></script>
