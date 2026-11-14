@@ -75,7 +75,7 @@ def test_global_search_is_scoped_and_bounded(seeded, login):
     assert n.get("/api/search?q=x").get_json()["results"] == []
 
 
-def test_global_search_respects_knowledge_clearance(tiers, login):
+def test_global_search_respects_knowledge_clearance(seeded, login):
     r = login(NEHA).get("/api/search?q=Rivalbrew")
     assert all(x.get("id") != "Z-01" for x in r.get_json()["results"])
     manager = login(ARJUN).get("/api/search?q=Rivalbrew")
