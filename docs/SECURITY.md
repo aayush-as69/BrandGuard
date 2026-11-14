@@ -18,7 +18,7 @@ wrong codes count toward the same throttle, an admin can reset a lost device. **
 **Roles.** creator (writes), manager and reviewer (approve something they did not write), admin (knowledge base and users).
 Agency users are *external*: they see only their own content and only public guidance.
 
-**Source access.** Every rule and fact is public, internal or confidential. A finding that cites something the viewer may not see
+**Source access.** Every rule and fact is public, internal, confidential or restricted. Creators can see public/internal material; managers, reviewers and admins can see all four tiers. A finding that cites something the viewer may not see
 is redacted (no quote, no rule text, no suggested fix from it), and "Accept fix" is refused. A missing source is treated as hidden.
 
 **Request safety.** State-changing requests with a cross-site `Origin` or `Sec-Fetch-Site: cross-site` are refused. The CSP allows
