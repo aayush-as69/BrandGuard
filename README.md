@@ -60,7 +60,7 @@ Brand reviews often depend on scattered documents, memory, and subjective feedba
 ### Knowledge base and access controls
 - Import guidelines from PDF, DOCX, TXT, and Markdown.
 - Manage approved facts, glossary terms, assets, and access levels.
-- Public, internal, and confidential source visibility.
+- Public, internal, confidential, and restricted source visibility.
 - External agency users cannot browse the knowledge base; restricted source details and suggested fixes are redacted.
 
 ### Optional AI tone and messaging review

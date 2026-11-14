@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from brandguard import db, retention
-from conftest import IRA, NEHA, Session
+from conftest import ARJUN, IRA, NEHA, Session
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -64,3 +64,19 @@ def test_hsts_only_in_production(tmp_path, monkeypatch):
     monkeypatch.setenv("BRANDGUARD_ADMIN_EMAIL", "a@b.co")
     monkeypatch.setenv("BRANDGUARD_ADMIN_PASSWORD", "long-enough-pass")
     assert "Strict-Transport-Security" in create_app(str(tmp_path / "b.db")).test_client().get("/healthz").headers
+
+
+def test_global_search_is_scoped_and_bounded(seeded, login):
+    n = login(NEHA)
+    cid = n.post("/api/content", title="Searchable Campaign", body="hello searchneedle", images=[]).get_json()["id"]
+    r = n.get("/api/search?q=searchneedle")
+    assert r.status_code == 200
+    assert any(x["kind"] == "content" and x["id"] == cid for x in r.get_json()["results"])
+    assert n.get("/api/search?q=x").get_json()["results"] == []
+
+
+def test_global_search_respects_knowledge_clearance(seeded, login):
+    r = login(NEHA).get("/api/search?q=Rivalbrew")
+    assert all(x.get("id") != "Z-01" for x in r.get_json()["results"])
+    manager = login(ARJUN).get("/api/search?q=Rivalbrew")
+    assert any(x.get("id") == "Z-01" for x in manager.get_json()["results"])
