@@ -76,7 +76,30 @@ def test_global_search_is_scoped_and_bounded(seeded, login):
 
 
 def test_global_search_respects_knowledge_clearance(seeded, login):
+    # The base demo seed intentionally contains only public Brewline material.
+    # Create the confidential source explicitly so this test exercises the
+    # clearance boundary rather than depending on unrelated seed contents.
+    admin = login(IRA)
+    imported = admin.c.post(
+        "/api/kb/import",
+        data={
+            "kind": "guidelines",
+            "title": "Confidential competitor guidance",
+            "access_level": "confidential",
+            "text": "Z-01 | Competitors: Never mention the competitor Rivalbrew in any copy.",
+        },
+    )
+    assert imported.status_code == 200
+
     r = login(NEHA).get("/api/search?q=Rivalbrew")
+    assert r.status_code == 200
     assert all(x.get("id") != "Z-01" for x in r.get_json()["results"])
+
     manager = login(ARJUN).get("/api/search?q=Rivalbrew")
-    assert any(x.get("id") == "Z-01" for x in manager.get_json()["results"])
+    assert manager.status_code == 200
+    assert any(
+        x.get("kind") == "rule"
+        and x.get("id") == "Z-01"
+        and x.get("access_level") == "confidential"
+        for x in manager.get_json()["results"]
+    )
