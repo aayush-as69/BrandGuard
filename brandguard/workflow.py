@@ -20,7 +20,7 @@ import types
 import re
 from typing import Callable, Optional
 
-from . import engine
+from . import engine, rewrite as rw
 from .db import now
 from .errors import Forbidden, NotFound
 from .kb import ACCESS_LEVELS
@@ -251,14 +251,15 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
     ver = c["current_version"]
     dismissals = _Dismissals(conn, content_id)
 
+    images = _with_measures(conn, v["images"])
     inherited = _inherited_ai_findings(conn, content_id, ver, v["body"]) if ai == "inherit" else []
     judge = judge_factory(conn, content_id, ver) if (judge_factory and ai == "fresh") else None
     schedule = getattr(judge_factory, "schedule", None) if judge else None
     if schedule:  # rules now, AI afterwards: the author is not kept waiting for the provider
-        result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=None, inherited=inherited)
+        result = engine.review(engine.load_kb(conn), v["body"], images, judge=None, inherited=inherited)
         result.llm_status = PENDING
     else:
-        result = engine.review(engine.load_kb(conn), v["body"], v["images"], judge=judge, inherited=inherited)
+        result = engine.review(engine.load_kb(conn), v["body"], images, judge=judge, inherited=inherited)
     if ai == "off":
         result.llm_status = "skipped: AI review was switched off for this review (the text was not sent anywhere)"
     elif ai == "inherit" and not inherited:
@@ -356,7 +357,7 @@ def create_content(conn, user: dict, title: str, body: str, images: list[dict],
                    judge_factory: Optional[Callable] = None, ai: str = "fresh") -> int:
     title = _text(title, "Title", MAX_TITLE, required=True).strip()
     body = _text(body, "Content text", MAX_BODY, required=True)
-    images = _clean_images(images)
+    images = _clean_images(images, conn, user["id"])
     cur = conn.execute(
         "INSERT INTO content(title, author_id, created_at) VALUES (?,?,?)", (title, user["id"], now()))
     cid = cur.lastrowid
@@ -369,7 +370,20 @@ def create_content(conn, user: dict, title: str, body: str, images: list[dict],
     return cid
 
 
-def _clean_images(images) -> list[dict]:
+def _with_measures(conn, images: list[dict]) -> list[dict]:
+    """Copies of the images with the pixel measurements the author's file read produced (stored by check_id)."""
+    out = []
+    for img in images:
+        img = dict(img)
+        if img.get("check_id"):
+            row = conn.execute("SELECT measure FROM image_checks WHERE id=?", (img["check_id"],)).fetchone()
+            if row:
+                img["measure"] = json.loads(row["measure"])
+        out.append(img)
+    return out
+
+
+def _clean_images(images, conn=None, user_id: Optional[int] = None, keep: frozenset = frozenset()) -> list[dict]:
     if images is None:
         return []
     if not isinstance(images, list):
@@ -386,12 +400,25 @@ def _clean_images(images) -> list[dict]:
         if name in seen:
             raise ValueError(f"Image name '{name}' is used twice; names must be unique")
         seen.add(name)
-        out.append({
+        item = {
             "name": name,
             "alt": _text(img.get("alt"), "Alt text", MAX_FIELD).strip(),
             "text_color": _colour(img.get("text_color"), "Text colour"),
             "bg_color": _colour(img.get("bg_color"), "Background colour"),
-        })
+        }
+        if img.get("logo") in (True, "true", "on", "1", 1):
+            item["logo"] = True
+        cid = img.get("check_id")
+        if cid not in (None, "", 0):
+            if isinstance(cid, bool) or not str(cid).isdigit():
+                raise ValueError("Image check reference is not valid")
+            cid = int(cid)
+            if conn is not None and cid not in keep:
+                row = conn.execute("SELECT user_id FROM image_checks WHERE id=?", (cid,)).fetchone()
+                if not row or row["user_id"] != user_id:
+                    raise ValueError("That image measurement was not found. Read the image file again.")
+            item["check_id"] = cid
+        out.append(item)
     return out
 
 
@@ -419,7 +446,8 @@ def revise(conn, user: dict, content_id: int, body: str, images: list[dict],
     if not permissions(conn, user, c)["can_revise"]:
         raise Forbidden("Only the author can edit, and only while the content is a draft or has changes requested")
     body = _text(body, "Content text", MAX_BODY, required=True)
-    return _new_version(conn, c, user["id"], body, _clean_images(images), "Edited by author", judge_factory, ai)
+    keep = frozenset(i["check_id"] for i in current(conn, c)["images"] if i.get("check_id"))
+    return _new_version(conn, c, user["id"], body, _clean_images(images, conn, user["id"], keep), "Edited by author", judge_factory, ai)
 
 
 # -------------------------------------------------------------------- decisions
@@ -453,6 +481,8 @@ def _apply(f: dict, replacement: str, body: str, images: list[dict]) -> tuple[st
     img = next((i for i in images if i["name"] == name), None)
     if not img:
         raise ValueError("Image no longer exists in this version")
+    if field not in ("image.alt", "image.text_color"):
+        raise ValueError("This finding needs a change to the image itself. Fix the image, read it again, or dismiss the finding.")
     if field == "image.alt":
         replacement = replacement.strip()
         img["alt"] = replacement
@@ -465,8 +495,10 @@ def _apply(f: dict, replacement: str, body: str, images: list[dict]) -> tuple[st
 
 
 def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] = None,
-           reason: Optional[str] = None, judge_factory: Optional[Callable] = None) -> dict:
-    """Accept the suggested fix, edit it, or dismiss the finding. Accept and edit create a new version."""
+           reason: Optional[str] = None, judge_factory: Optional[Callable] = None,
+           strength: Optional[str] = None) -> dict:
+    """Accept the suggested fix, edit it, use a checked rewrite, or dismiss the finding.
+    Accept, edit and rewrite create a new version."""
     row = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
     if not row:
         raise NotFound("Finding not found")
@@ -481,10 +513,12 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
         raise ValueError("This finding belongs to an older version")
     if f["decision"] != "open":
         raise ValueError("This finding already has a decision")
-    if action not in ("accept", "edit", "dismiss"):
-        raise ValueError("action must be accept, edit or dismiss")
+    if action not in ("accept", "edit", "dismiss", "rewrite"):
+        raise ValueError("action must be accept, edit, rewrite or dismiss")
     if action == "dismiss":
         return _dismiss(conn, user, c, f, perms, reason)
+    if action == "rewrite":
+        return _rewrite(conn, user, c, f, text, strength, judge_factory)
 
     if action == "accept":
         if is_restricted(f, visible_sources(conn, user)):
@@ -509,6 +543,75 @@ def decide(conn, user: dict, finding_id: int, action: str, text: Optional[str] =
                        f"{verb.capitalize()} fix for {f['source_id']} ({f['span_text']})",
                        judge_factory, ai="inherit")  # applying a fix never re-sends content to the AI
     return {"decision": verb, "new_version": ver}
+
+
+def _open_current_findings(conn, c: dict) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM findings WHERE content_id=? AND version=? ORDER BY span_start, id",
+        (c["id"], c["current_version"]))]
+
+
+def _restricted_codes(conn, user: dict, findings: list[dict]) -> set[str]:
+    visible = visible_sources(conn, user)
+    return {f["source_id"] for f in findings if is_restricted(f, visible)}
+
+
+def rewrite_options(conn, user: dict, finding_id: int, rewriter_factory: Optional[Callable] = None) -> dict:
+    """Checked rewrite options for one open finding. Rules always; the AI too if a factory is given."""
+    row = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
+    if not row:
+        raise NotFound("Finding not found")
+    f = dict(row)
+    c = get_content(conn, user, f["content_id"])
+    if not permissions(conn, user, c)["can_decide"] or c["status"] == "approved":
+        raise Forbidden("You cannot make decisions on this content right now")
+    if f["version"] != c["current_version"] or f["decision"] != "open":
+        raise ValueError("This finding is no longer open")
+    v = current(conn, c)
+    everything = _open_current_findings(conn, c)
+    skip = _restricted_codes(conn, user, everything)
+    if f["source_id"] in skip:
+        return {"options": [], "hidden": 0, "ai": "", "note": "This finding rests on a restricted source, so no rewrite is offered. Use Edit to write your own wording."}
+    kb = engine.load_kb(conn)
+    texts, ai_note = None, ""
+    if rewriter_factory:
+        rewriter = rewriter_factory(conn, c["id"], c["current_version"])
+        if rewriter is None:
+            ai_note = "No AI provider is configured."
+        else:
+            try:
+                texts = rw.ai_texts(rewriter, kb, v["body"], f, everything, skip)
+            except Exception as exc:  # fails closed: the rule-based options are still shown
+                ai_note = f"The AI could not be used: {exc}"
+            if texts is not None and not texts and not ai_note:
+                ai_note = "The AI did not return usable wording."
+    out = rw.options(kb, v["body"], v["images"], f, [x for x in everything], skip, texts)
+    out["ai"] = ai_note
+    out["note"] = "" if out["options"] else "No safe rewrite is available for this finding. Use Edit to write your own wording."
+    return out
+
+
+def _rewrite(conn, user: dict, c: dict, f: dict, text: Optional[str], strength: Optional[str],
+             judge_factory: Optional[Callable]) -> dict:
+    """Apply a rewrite option. The wording comes from the client, so every check runs again here."""
+    if not isinstance(text, str):
+        raise ValueError("Provide the rewritten text")
+    if is_restricted(f, visible_sources(conn, user)):
+        raise Forbidden("This finding rests on a restricted source. Use Edit to write your own wording.")
+    v = current(conn, c)
+    kb = engine.load_kb(conn)
+    start, end = rw.validate(kb, v["body"], v["images"], f, strength or "", _text(text, "Rewrite", 4000))
+    old = v["body"][start:end]
+    body = v["body"][:start] + text + v["body"][end:]
+    if not conn.execute(
+            "UPDATE findings SET decision='accepted', decision_text=?, decided_by=?, decided_at=? "
+            "WHERE id=? AND decision='open'", (text, user["id"], now(), f["id"])).rowcount:
+        raise ValueError("Someone else already decided this finding")
+    audit(conn, c["id"], user["id"], "finding_accepted",
+          f"#{f['id']} {f['source_id']}: rewrite ({strength}) {old[:120]!r} -> {text[:120]!r}")
+    ver = _new_version(conn, c, user["id"], body, [dict(i) for i in v["images"]],
+                       f"Rewrite ({strength}) for {f['source_id']} ({f['span_text'][:40]})", judge_factory, ai="inherit")
+    return {"decision": "accepted", "new_version": ver}
 
 
 # --------------------------------------------------------------- collaboration

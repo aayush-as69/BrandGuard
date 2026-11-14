@@ -1,6 +1,7 @@
 """Flask app: JSON API plus the single-page review UI."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -15,9 +16,13 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from . import benchmark as bench
 from . import db as dbm
 from . import insights
+from . import learning
+from . import engine
 from . import imaging
+from . import pixels
 from . import record
 from . import throttle
 from . import totp
@@ -487,14 +492,34 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.post("/api/image/analyze")
     def image_analyze():
-        me()
+        user = me()
         f = request.files.get("image")
         if not f:
             raise ValueError("Attach an image file")
+        data = f.read(imaging.MAX_BYTES + 1)
         try:
-            return jsonify(imaging.analyse(f.read(imaging.MAX_BYTES + 1)))
+            img = imaging.open_image(data)
+            out = imaging.analyse(data, img)
         except imaging.ImageError as exc:
             raise ValueError(str(exc))
+        text = request.form.get("text_color", "").strip() or out["text_color"]
+        kb = engine.load_kb(conn())
+        logo_cfg = kb.checks.get("logo")
+        measure = pixels.measure(img, logo_cfg if logo_cfg is not None else None, text)
+        cur = conn().execute("INSERT INTO image_checks(user_id, sha256, name, created_at, measure) VALUES (?,?,?,?,?)",
+                             (user["id"], hashlib.sha256(data).hexdigest(), (f.filename or "")[:200], dbm.now(), json.dumps(measure)))
+        conn().commit()
+        logo = measure.get("logo")
+        out.update(check_id=cur.lastrowid, logo=None if logo is None else bool(logo["found"]),
+                   note=out["note"] + " The image was also measured: colours, logo and the contrast of text-coloured areas.")
+        return jsonify(out)
+
+    @app.get("/api/image/sample/<name>")
+    def image_sample(name):
+        me()
+        if name not in ("ok", "bad"):
+            raise NotFound("No such sample")
+        return send_from_directory(ROOT / "seed", f"sample-banner-{name}.png", mimetype="image/png")
 
     @app.post("/api/mfa/setup")
     def mfa_setup():
@@ -804,8 +829,22 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/findings/<int:fid>/decide")
     def finding_decide(fid: int):
         data = payload()
-        out = wf.decide(conn(), me(), fid, data.get("action"), data.get("text"), data.get("reason"), judge_factory)
+        out = wf.decide(conn(), me(), fid, data.get("action"), data.get("text"), data.get("reason"), judge_factory,
+                        data.get("strength"))
         return jsonify(out)
+
+    @app.post("/api/findings/<int:fid>/rewrites")
+    def finding_rewrites(fid: int):
+        """Checked rewrite options for a finding. {"use_ai": true} adds wording from the AI provider (masked text)."""
+        use_ai = payload().get("use_ai", False)
+        if not isinstance(use_ai, bool):
+            raise ValueError("use_ai must be true or false")
+        factory = None
+        if use_ai:
+            if not llm.ai_available(app.config["LLM_CALL"]):
+                raise ValueError("No AI provider is configured on this server")
+            factory = lambda c, cid, ver: llm.make_rewriter(c, cid, ver, call=app.config["LLM_CALL"])
+        return jsonify(wf.rewrite_options(conn(), me(), fid, factory))
 
     @app.post("/api/content/<int:cid>/comments")
     def content_comment(cid: int):
@@ -834,6 +873,96 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
             raise Forbidden("Insights are for your own managers, reviewers and admins")
         return jsonify(insights.compute(conn()))
+
+    # ------------------------------------------------------- quality and learning
+    def quality_viewer() -> dict:
+        user = me()
+        if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
+            raise Forbidden("Quality results are for your own managers, reviewers and admins")
+        return user
+
+    def quality_admin() -> dict:
+        user = me()
+        if user["role"] != "admin" or user["is_external"]:
+            raise Forbidden("Only an admin can run the benchmark or change the knowledge base")
+        return user
+
+    def quality_payload(c) -> dict:
+        latest = bench.latest(c)
+        if latest is None and not bench.pending(c):  # the rule-only run is instant, so there is always something to show
+            bench.save(c, None, bench.run(c), "First run")
+            latest = bench.latest(c)
+        return dict(benchmark=latest, history=bench.history(c), pending=bool(bench.pending(c)),
+                    failed=bench.last_failure(c), ai_available=llm.ai_available(app.config["LLM_CALL"]),
+                    suggestions=learning.suggestions(c, latest), changes=learning.changes(c))
+
+    @app.get("/api/quality")
+    def quality_view():
+        quality_viewer()
+        return jsonify(quality_payload(conn()))
+
+    @app.post("/api/benchmark/run")
+    def benchmark_run():
+        user = quality_admin()
+        use_ai = payload().get("use_ai", False)
+        if not isinstance(use_ai, bool):
+            raise ValueError("use_ai must be true or false")
+        c = conn()
+        if not use_ai:
+            bench.save(c, user["id"], bench.run(c), "Rules only")
+            wf.audit(c, None, user["id"], "benchmark_run", "rules only")
+            return jsonify(quality_payload(c))
+        if not llm.ai_available(app.config["LLM_CALL"]):
+            raise ValueError("No AI provider is configured on this server, so the AI judge cannot be measured.")
+        if bench.pending(c):
+            raise ValueError("A benchmark with the AI judge is already running. Reload in a minute.")
+        wf.audit(c, None, user["id"], "benchmark_run", "with the AI judge")
+
+        def work(run_id: int) -> None:
+            conn2 = dbm.connect(app.config["DB_PATH"])
+            try:
+                judge = llm.make_judge(conn2, None, None, call=app.config["LLM_CALL"])
+                bench.finish_pending(conn2, run_id, bench.run(conn2, judge=judge))
+            except Exception as exc:
+                app.logger.exception("AI benchmark failed")
+                bench.finish_pending(conn2, run_id, None, f"{type(exc).__name__}: {exc}")
+            finally:
+                conn2.close()
+
+        run_id = bench.start_pending(c, user["id"], "With AI judge")
+        if ai_async:
+            pool.submit(work, run_id)
+        else:
+            work(run_id)
+        return jsonify(quality_payload(c))
+
+    @app.post("/api/learning/apply")
+    def learning_apply():
+        user = quality_admin()
+        data = payload()
+        sid = data.get("suggestion")
+        if not isinstance(sid, str) or not sid:
+            raise ValueError("Say which suggestion to apply")
+        note = data.get("note")
+        if note is not None and not isinstance(note, str):
+            raise ValueError("note must be text")
+        c = conn()
+        out = learning.apply(c, user["id"], sid, note)
+        wf.audit(c, None, user["id"], "kb_learning_applied", out["summary"])
+        c.commit()
+        return jsonify({**out, **quality_payload(c)})
+
+    @app.post("/api/learning/undo")
+    def learning_undo():
+        user = quality_admin()
+        cid = payload().get("change_id")
+        if not isinstance(cid, int) or isinstance(cid, bool):
+            raise ValueError("Say which change to undo")
+        c = conn()
+        out = learning.revert(c, user["id"], cid)
+        wf.audit(c, None, user["id"], "kb_learning_undone", out["summary"])
+        c.commit()
+        return jsonify({**out, **quality_payload(c)})
 
     @app.get("/api/llm-log")
     def llm_log():

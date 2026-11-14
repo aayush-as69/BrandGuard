@@ -21,6 +21,6 @@ async function run(fn){try{await fn()}catch(e){toast(e.message,true)}}
 
 let RID=0; // only the most recent render may draw, so a slow earlier request cannot overwrite a newer screen
 function render(){
-  const f=TAB==='kb'?renderKB:TAB==='insights'?renderInsights:TAB==='users'?renderUsers:renderContent;
+  const f=TAB==='kb'?renderKB:TAB==='insights'?renderInsights:TAB==='quality'?renderQuality:TAB==='users'?renderUsers:renderContent;
   return Promise.resolve().then(f).catch(e=>{if(ME)$('#main').innerHTML='<div class="card" role="alert"><h2>Could not load this screen</h2><p class="muted">'+esc(e.message)+'</p><p><button class="btn" data-c="render">Try again</button></p></div>'})}
 
