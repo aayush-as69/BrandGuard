@@ -24,22 +24,36 @@ function imgRow(i={}){return `<div class="imgrow">
   <input type="text" placeholder="alt text" aria-label="Image alt text" value="${esc(i.alt||'')}" data-k="alt">
   <input type="text" placeholder="text colour #RRGGBB" aria-label="Text colour on the image" value="${esc(i.text_color||'')}" data-k="text_color">
   <input type="text" placeholder="background #RRGGBB" aria-label="Background colour behind the text" value="${esc(i.bg_color||'')}" data-k="bg_color">
-  <label class="small muted">Read colours from a file <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-img="1" aria-label="Choose an image file to read its colours"></label>
+  <input type="hidden" aria-label="Image measurement reference" data-k="check_id" value="${esc(i.check_id||'')}">
+  <label class="small muted"><input type="checkbox" data-k="logo"${i.logo?' checked':''} aria-label="This image should show the Brewline logo"> Should show the logo</label>
+  <label class="small muted">Measure an image file <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-img="1" aria-label="Choose an image file to measure its colours, logo and text contrast"></label>
   <button class="btn" type="button" aria-label="Remove this image" data-c="removeRow">×</button></div>`}
+async function analyseInto(row,file){
+  const fd=new FormData();fd.append('image',file);
+  const r=await api('/api/image/analyze',{method:'POST',body:fd});
+  const set=(k,v)=>{const i=row.querySelector(`[data-k=${k}]`);if(i&&v!==undefined&&v!==null)i.value=v};
+  if(!row.querySelector('[data-k=name]').value)set('name',file.name||'banner.png');
+  set('bg_color',r.bg_color);set('text_color',r.text_color);set('check_id',r.check_id);
+  const box=row.querySelector('[data-k=logo]');if(box&&r.logo)box.checked=true;
+  toast(`${r.width}×${r.height}px. ${r.note}`)}
 document.addEventListener('change',e=>{const t=e.target;if(!t.dataset||!t.dataset.img||!t.files[0])return;
-  run(async()=>{const fd=new FormData();fd.append('image',t.files[0]);
-    const r=await api('/api/image/analyze',{method:'POST',body:fd});const row=t.closest('.imgrow');
-    const set=(k,v)=>{const i=row.querySelector(`[data-k=${k}]`);if(i&&v)i.value=v};
-    if(!row.querySelector('[data-k=name]').value)set('name',t.files[0].name);
-    set('bg_color',r.bg_color);set('text_color',r.text_color);toast(`${r.width}×${r.height}px. ${r.note}`)})});
-function readImgs(){return [...document.querySelectorAll('#imgs .imgrow')].map(r=>{const o={};r.querySelectorAll('input').forEach(i=>o[i.dataset.k]=i.value);return o}).filter(o=>o.name)}
+  run(()=>analyseInto(t.closest('.imgrow'),t.files[0]))});
+async function sampleBanner(kind){run(async()=>{
+  const r=await fetch('/api/image/sample/'+kind,{credentials:'same-origin'});if(!r.ok)throw new Error('Could not load the sample image');
+  const blob=await r.blob();document.getElementById('imgs').insertAdjacentHTML('beforeend',imgRow({alt:'Brewline banner: Signature Blend, now in a 250g pouch'}));
+  const row=[...document.querySelectorAll('#imgs .imgrow')].pop();
+  await analyseInto(row,new File([blob],`banner-${kind}.png`,{type:'image/png'}));
+  row.querySelector('[data-k=logo]').checked=true})}
+function readImgs(){return [...document.querySelectorAll('#imgs .imgrow')].map(r=>{const o={};r.querySelectorAll('input[data-k]').forEach(i=>o[i.dataset.k]=i.type==='checkbox'?i.checked:i.value);return o}).filter(o=>o.name)}
 function showNew(){
   CUR=null;DETAIL=null;
   $('#detail').innerHTML=`<div class="card stack"><div class="section-kicker">NEW REVIEW</div><h2>Submit content for review</h2><p class="muted small">Paste the draft you want to check. Findings are tied back to the approved knowledge base.</p>
    <div><label class="small muted" for="nt">Title</label><input type="text" id="nt" maxlength="200"></div>
    <div><label class="small muted" for="nb">Text (paste an email, post or page)</label><textarea id="nb" rows="12" maxlength="50000"></textarea></div>
-   <div><label class="small muted">Images (checked for alt text and text contrast)</label><div id="imgs"></div>
-     <button class="btn small" type="button" data-c="addImgRow">Add image</button></div>
+   <div><label class="small muted">Images (checked for alt text, brand colours, logo use and text contrast)</label><div id="imgs"></div>
+     <div class="row"><button class="btn small" type="button" data-c="addImgRow">Add image</button>
+     <button class="btn small" type="button" data-c="sampleBanner" data-a='["ok"]'>Try an on-brand sample banner</button>
+     <button class="btn small" type="button" data-c="sampleBanner" data-a='["bad"]'>Try an off-brand sample banner</button></div></div>
    ${aiBox('nai')}
    <div class="row"><button class="btn primary" data-c="createContent">Review now</button>
      <button class="btn" data-c="loadDemo">Load demo email</button></div></div>`;
@@ -81,7 +95,7 @@ async function loadDetail(id,rid){
         <div class="body" id="body">${highlight(d)}</div>
         ${d.images.length?`<h3 class="u-mt14">Images</h3><table>${d.images.map(i=>`<tr><td><b>${esc(i.name)}</b></td>
           <td>alt: ${i.alt?esc(i.alt):'<span class="st-contradicted">missing</span>'}</td>
-          <td>${i.text_color&&i.bg_color?`<span class="swatch" data-bg="${esc(i.bg_color)}" data-fg="${esc(i.text_color)}">Aa</span> ${esc(i.text_color)} on ${esc(i.bg_color)}`:''}</td></tr>`).join('')}</table>`:''}
+          <td>${i.text_color&&i.bg_color?`<span class="swatch" data-bg="${esc(i.bg_color)}" data-fg="${esc(i.text_color)}">Aa</span> ${esc(i.text_color)} on ${esc(i.bg_color)}`:''}${i.check_id?' <span class="small muted">measured from pixels</span>':''}</td></tr>`).join('')}</table>`:''}
         ${p.can_revise?`<details class="u-mt12"><summary>Edit the text myself</summary>
           <textarea class="u-my8" id="rb" rows="8" aria-label="Edit the content text">${esc(d.body)}</textarea>
           ${aiBox('rai')}<button class="btn" data-c="revise">Save as new version</button></details>`:''}</div>
@@ -133,14 +147,33 @@ function findingCard(f,p,c){
     ${done?`<p class="u-m6-0-0 small"><b>${esc(f.decision)}</b> by ${esc(f.decided_by_name||'')}${f.decision_reason?': '+esc(f.decision_reason):''}</p>`
     :(p.can_decide?`<div class="u-mt8 row">
         <button class="btn good" ${fix?'':`disabled title="${f.restricted?'Restricted fact: ask the brand team, or use Edit.':'No suggested fix. Use Edit.'}"`} data-c="decide" data-a='[${f.id},"accept"]'>Accept fix</button>
+        ${f.target==='body'&&!f.restricted?`<button class="btn" data-c="rewriteOpen" data-a='[${f.id},false]'>Rewrite options</button>`:''}
         <button class="btn" data-c="toggle" data-a='["e${f.id}"]'>Edit</button>
         <button class="btn bad" data-c="toggle" data-a='["d${f.id}"]'>Dismiss</button></div>
+      <div id="rw${f.id}" class="u-mt8 hidden" role="region" aria-label="Rewrite options"></div>
       <div id="e${f.id}" class="u-mt8 hidden row"><input class="u-flex1" type="text" id="et${f.id}" aria-label="Replacement text" value="${esc(fix||(f.target==='body'?f.span_text:''))}">
         <button class="btn primary" data-c="decideEdit" data-a='[${f.id}]'>Apply my edit</button></div>
       <div id="d${f.id}" class="u-mt8 hidden row"><input class="u-flex1" type="text" id="dr${f.id}" placeholder="Reason (required)" aria-label="Reason for dismissing" maxlength="500">
         <button class="btn bad" data-c="decideDismiss" data-a='[${f.id}]'>Dismiss with reason</button></div>`:'')}
   </div>`;
 }
+/* Rewrite options: up to three strengths, each checked on the server, each shown as a diff */
+const RW={};
+const diffHTML=ops=>`<div class="diff">${ops.map(o=>o.op==='del'?`<del>${esc(o.text)}</del>`:o.op==='ins'?`<ins>${esc(o.text)}</ins>`:esc(o.text)).join('')}</div>`;
+function rewriteOpen(id,ai){run(async()=>{
+  const box=document.getElementById('rw'+id);
+  if(!ai&&!box.classList.contains('hidden')){box.classList.add('hidden');return}
+  const r=await api('/api/findings/'+id+'/rewrites',{json:{use_ai:!!ai}});RW[id]=r.options;
+  box.innerHTML=(r.options.length?r.options.map((o,i)=>`<div class="item u-cursor-default"><p><b>${esc(o.label)}</b> ${o.source==='ai'?'<span class="chip ai">AI wording</span>':''} <span class="chip approved">checked</span></p>
+      ${diffHTML(o.diff)}<button class="btn good" data-c="rewriteUse" data-a='[${id},${i}]'>Use this</button></div>`).join(''):`<p class="small muted">${esc(r.note)}</p>`)
+    +(r.hidden?`<p class="small muted">${r.hidden} other wording${r.hidden===1?' was':'s were'} hidden because ${r.hidden===1?'it':'they'} would break a rule or change a fact.</p>`:'')
+    +(r.ai?`<p class="small muted">${esc(r.ai)}</p>`:'')
+    +(AICFG.enabled&&!ai?`<button class="btn small" data-c="rewriteOpen" data-a='[${id},true]'>Ask the AI for fuller wording</button> <span class="small muted">Sends this passage, with emails, links, amounts and phone numbers masked, to ${esc(AICFG.provider||'the AI provider')}. Every option is checked the same way.</span>`:'')
+    +'<p class="small muted">Nothing changes until you click Use this.</p>';
+  box.classList.remove('hidden')})}
+function rewriteUse(id,i){const o=(RW[id]||[])[i];if(!o)return;
+  run(async()=>{const r=await api('/api/findings/'+id+'/decide',{json:{action:'rewrite',strength:o.strength,text:o.after}});
+    toast('Applied as version '+r.new_version+'. Content was re-reviewed.');await renderContent()})}
 const toggle=id=>document.getElementById(id).classList.toggle('hidden');
 function removeRow(el){el.parentElement.remove()}
 function addImgRow(){document.getElementById('imgs').insertAdjacentHTML('beforeend',imgRow())}

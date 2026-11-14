@@ -207,12 +207,28 @@ def _m6_login_failures(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_login_failures_key ON login_failures(key, at)")
 
 
+def _m7_quality(conn: sqlite3.Connection) -> None:
+    """Round 3: benchmark runs, versioned knowledge-base changes, and measurements read from uploaded images."""
+    conn.execute("""CREATE TABLE benchmark_runs(
+        id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_id INTEGER, label TEXT NOT NULL DEFAULT '',
+        with_ai INTEGER NOT NULL DEFAULT 0, result TEXT NOT NULL)""")
+    conn.execute("""CREATE TABLE kb_changes(
+        id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_id INTEGER, kind TEXT NOT NULL, target TEXT NOT NULL,
+        summary TEXT NOT NULL, before TEXT NOT NULL, after TEXT NOT NULL, suggestion TEXT NOT NULL DEFAULT '',
+        run_before INTEGER, run_after INTEGER, reverted_at TEXT, reverted_by INTEGER)""")
+    conn.execute("""CREATE TABLE image_checks(
+        id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, sha256 TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL, measure TEXT NOT NULL)""")
+    conn.execute("CREATE INDEX idx_image_checks_user ON image_checks(user_id, id)")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (2, "indexes on the main query paths", _m2_indexes),
     (3, "AI log keeps metadata, not just the prompt", _m3_llm_log_metadata),
     (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
     (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
+    (7, "benchmark runs, versioned knowledge-base changes, measured image checks", _m7_quality),
 ]
 
 

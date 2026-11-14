@@ -146,6 +146,14 @@ python -m pytest -q
 
 The suite contains about 225 tests. Browser tests run when their browser dependencies are available and otherwise skip. See [Testing](docs/TESTING.md) for the full test and manual verification guide.
 
+## Round 3 improvements
+
+- **Checked rewrites.** Each finding offers minimal, balanced and full rewrite options (span, sentence or paragraph). Every option is re-checked: no new rule violation, the flagged problem is gone, facts (prices, dates, numbers) are identical and structure is kept. A word diff is shown and nothing is applied until you click. AI wording is used only on masked text and only when asked for.
+- **Measured image checks.** Uploading an image file reads real pixels (Pillow and numpy): palette share outside the brand colours (G-08), logo presence, width and clear space (G-09), and text contrast against the background actually around the text (G-06). Try the two sample banners in the new-review form. Limits: the logo is found by its shape in the brand inks, so a heavily altered or recoloured logo may not be found; the text colour must be supplied or estimated.
+- **Quality page and learning loop (admin).** A labelled benchmark (`seed/benchmark.json`) gives precision and recall per rule. Suggestions built from real decisions and the benchmark (retire a term, allow an acronym, add a rule note) can be applied in one click, are versioned, re-run the benchmark before and after, and can be undone.
+
+An existing deployed database needs a knowledge-base re-import (or "Load demo knowledge base") to get rules G-08/G-09 and the new settings.
+
 ## Demo walkthrough
 
 The included demo uses **Brewline Coffee**, a fictional brand. All seeded content is synthetic.

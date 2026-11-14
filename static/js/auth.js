@@ -37,7 +37,8 @@ function afterLogin(){
   // Insights are about the guidelines, for the people who own them (not for authors).
   const noInsights=ME.role==='creator';
   document.querySelector('#nav [data-tab=insights]').classList.toggle('hidden',noInsights);
-  if((ME.is_external&&TAB==='kb')||(noInsights&&TAB==='insights')||(TAB==='users'&&ME.role!=='admin'))TAB='content';
+  document.querySelector('#nav [data-tab=quality]').classList.toggle('hidden',noInsights);
+  if((ME.is_external&&TAB==='kb')||(noInsights&&(TAB==='insights'||TAB==='quality'))||(TAB==='users'&&ME.role!=='admin'))TAB='content';
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.tab===TAB));
   accountUI();return render()}
 let AUTH='demo',AICFG={enabled:false},DEMO={available:false,email:'',password:''};
