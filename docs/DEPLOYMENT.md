@@ -104,7 +104,7 @@ Test a restore before you need one. The backup contains content, comments and th
 - [ ] `/healthz` wired to the platform's health check; logs collected
 - [ ] Health check alert configured; smoke test passes through the public URL; one restore drill done (docs/TESTING.md)
 - [ ] `pip-audit` (CI runs it) is clean; dependabot enabled
-- [ ] Brand owners understand image checks use metadata, not pixels (SECURITY.md)
+- [ ] Brand owners understand image checks measure pixels but do not recognise picture contents, and that logo detection is shape matching (QUALITY.md); existing databases re-import the knowledge base for rules G-08 and G-09
 
 ## Limits (honest list)
 

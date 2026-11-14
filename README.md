@@ -44,10 +44,12 @@ Brand reviews often depend on scattered documents, memory, and subjective feedba
 ## Capabilities
 
 ### Evidence-based content review
-- Deterministic checks run first for glossary terms, tone rules, prices, dates, claims, image alt text, and colour contrast.
+- Deterministic checks run first for glossary terms, tone rules, prices, dates, claims, image alt text, colour contrast, and measured image palette and logo use.
 - Findings include the matched text, source, severity, and confidence.
 - Claim checks distinguish supported claims, contradictions, and statements without an approved source.
 - Suggested edits are presented as diffs. Authors can accept, edit, or dismiss them.
+- Checked rewrites (minimal, balanced, full) are re-validated by the rules engine, keep facts identical and apply only on click.
+- Image files are measured from real pixels: brand palette share, logo presence, size and clear space, and text contrast.
 
 ### A controlled review workflow
 - Creator, manager, reviewer, and administrator roles.
@@ -71,6 +73,7 @@ Brand reviews often depend on scattered documents, memory, and subjective feedba
 ### Operations and accessibility
 - Printable approval records with cited sources and audit history.
 - Guideline insights for managers, reviewers, and admins.
+- An admin Quality page: a labelled benchmark with precision and recall per rule, and versioned, undoable guideline suggestions.
 - A public landing page and a separate sign-in page (`/login`) for real accounts.
 - A separate **Try demo** path can prefill the configured demo credentials; demo role switching happens inside the demo session, from the account menu, without another email/password login.
 - A compact header: signed in, one account menu holds Change password, Two-step sign-in, Sign out and (on demo accounts) the role switch. Password and two-step changes use in-page dialogs, not browser pop-ups.
@@ -301,6 +304,7 @@ BrandGuard/
 |---|---|
 | [Deployment](docs/DEPLOYMENT.md) | Local and production setup, proxy configuration, health checks, migrations, monitoring, backups, and restore |
 | [Testing](docs/TESTING.md) | Automated tests, live-provider tests, deployment smoke test, accessibility checks, and restore drill |
+| [Quality](docs/QUALITY.md) | Checked rewrites, measured image checks, the benchmark and the learning loop |
 | [Security](docs/SECURITY.md) | Accounts, sessions, roles, source access, request safety, uploads, and known security boundaries |
 | [Privacy](docs/PRIVACY.md) | Data storage, AI disclosure, masking, request logs, retention, and deletion |
 | [Environment template](.env.example) | Available configuration variables and safe defaults |
@@ -326,8 +330,9 @@ Read the complete [Security](docs/SECURITY.md), [Privacy](docs/PRIVACY.md), and 
 - TOTP and proxy-based SSO are optional rather than mandatory.
 - The application does not encrypt the live database at the application layer.
 - Sentence and claim extraction is English-oriented and may miss unusual phrasing.
-- Rule-based suggestions are deliberately conservative; richer intent-preserving rewrites are future work.
-- Image checks evaluate metadata and estimated colour contrast. They do not use a vision model to identify image contents or verify that a logo is correct.
+- Rule-based rewrites are conservative; an isolated finding without AI may have only one distinct option.
+- Image checks measure pixels (palette, logo shape, clear space, contrast). Logo detection is shape matching and can miss an altered logo; there is no vision model to identify what a picture shows.
+- The benchmark is small and synthetic; its figures show direction, not production accuracy.
 - BrandGuard supports review workflows; it is not legal advice or a substitute for a brand owner's final judgement.
 
 ## Development and contribution
