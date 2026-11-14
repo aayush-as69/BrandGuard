@@ -44,3 +44,20 @@ def test_ai_deadline_is_bounded(monkeypatch):
         pass
     assert time.monotonic() - t < 3 and len(seen) == 1  # a 30 s retry-after is not honoured past the deadline
     assert seen[0][1] <= 3
+
+
+def test_bm25_handles_close_word_forms_and_title_boost():
+    rules = {
+        "R1": {"title": "Tone", "text": "Keep language warm and calm."},
+        "R2": {"title": "Pricing", "text": "Use approved amounts."},
+    }
+    assert retrieve.top_rules("warmer language", rules)[0] == "R1"
+    assert retrieve.top_rules("pricing", rules)[0] == "R2"
+
+
+def test_bm25_ties_are_deterministic():
+    rules = {
+        "B": {"title": "Shared", "text": "Use the same term."},
+        "A": {"title": "Shared", "text": "Use the same term."},
+    }
+    assert retrieve.top_rules("shared term", rules) == ["A", "B"]

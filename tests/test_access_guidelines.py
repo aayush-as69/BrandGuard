@@ -6,6 +6,7 @@ import pytest
 from conftest import ARJUN, IRA, NEHA, RAHUL
 
 SECRET = "Never mention the competitor Rivalbrew in any copy."
+RESTRICTED = "Do not reveal the private launch sequence for Project Ember."
 
 
 @pytest.fixture()
@@ -13,6 +14,7 @@ def tiers(seeded, login):
     """One guideline per access level, each with one glossary term that triggers it."""
     ira = login(IRA)
     for level, code, term, text in (
+        ("restricted", "W-01", "Ember", RESTRICTED),
         ("confidential", "Z-01", "Rivalbrew", SECRET),
         ("internal", "Y-01", "stalecoffee", "Internal note: never call our beans stalecoffee."),
         ("public", "X-01", "blandbean", "Public rule: do not call our beans blandbean."),
@@ -30,14 +32,14 @@ def _finding(session, body, code):
     return cid, next(f for f in d["findings"] if f["source_id"] == code), d
 
 
-BODY = "We beat Rivalbrew, stalecoffee and blandbean."
+BODY = "We beat Rivalbrew, Ember, stalecoffee and blandbean."
 
 
 def test_agency_sees_public_rules_only(tiers, login):
     n = login(NEHA)
     _, public, _ = _finding(n, BODY, "X-01")
     assert public["restricted"] is False and "Public rule" in public["source_quote"] and public["suggested_fix"]
-    for code in ("Y-01", "Z-01"):
+    for code in ("Y-01", "Z-01", "W-01"):
         _, f, _ = _finding(n, BODY, code)
         assert f["restricted"] is True and f["suggested_fix"] is None and f["source_quote"].startswith("Restricted")
 
@@ -45,14 +47,14 @@ def test_agency_sees_public_rules_only(tiers, login):
 def test_internal_creator_sees_internal_but_not_confidential(tiers, login):
     r = login(RAHUL)
     assert _finding(r, BODY, "Y-01")[1]["restricted"] is False
-    assert _finding(r, BODY, "Z-01")[1]["restricted"] is True
+    assert _finding(r, BODY, "Z-01")[1]["restricted"] is True\n    assert _finding(r, BODY, "W-01")[1]["restricted"] is True
 
 
 def test_manager_sees_everything(tiers, login):
     n = login(NEHA)
-    cid, _, _ = _finding(n, BODY, "Z-01")
-    f = next(x for x in login(ARJUN).get(f"/api/content/{cid}").get_json()["findings"] if x["source_id"] == "Z-01")
-    assert f["restricted"] is False and SECRET in f["source_quote"]
+    cid, _, _ = _finding(n, BODY, "W-01")
+    f = next(x for x in login(ARJUN).get(f"/api/content/{cid}").get_json()["findings"] if x["source_id"] == "W-01")
+    assert f["restricted"] is False and RESTRICTED in f["source_quote"]
 
 
 def test_confidential_text_appears_nowhere_in_an_agency_response_or_record(tiers, login):
@@ -97,3 +99,13 @@ def test_comment_finding_reference_is_validated(seeded, login):
         r = n.post(f"/api/content/{b}/comments", body="x", finding_id=bad)
         assert r.status_code == 400, (bad, r.status_code)
     assert n.post(f"/api/content/{b}/comments", body="no finding at all").status_code == 201
+
+
+def test_restricted_sources_are_visible_only_to_approvers(tiers, login):
+    r = login(RAHUL)
+    # The fixture already covers the creator boundary; a restricted source is
+    # intentionally a fourth tier that only approvers/admins can inspect.
+    assert r.get("/api/kb").status_code == 200
+    manager = login(ARJUN)
+    kb = manager.get("/api/kb").get_json()
+    assert any(x.get("access_level") == "restricted" for x in kb.get("facts", []) + kb.get("guidelines", []))

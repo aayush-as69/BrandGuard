@@ -969,6 +969,43 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         c.commit()
         return jsonify({**out, **quality_payload(c)})
 
+    @app.get("/api/search")
+    def search():
+        """Small cross-surface search, scoped to content ownership and KB clearance."""
+        user = me()
+        q = str(request.args.get("q", "")).strip()
+        if len(q) < 2:
+            return jsonify(results=[])
+        q = q[:120]
+        like = f"%{q}%"
+        c = conn()
+        rows = c.execute(
+            "SELECT id, title, status, author_id, created_at FROM content "
+            "WHERE (title LIKE ? OR id IN (SELECT content_id FROM versions WHERE body LIKE ?)) "
+            "ORDER BY id DESC LIMIT 20", (like, like)
+        ).fetchall()
+        visible = []
+        for r in rows:
+            if user["role"] == "creator" and r["author_id"] != user["id"]:
+                continue
+            visible.append({"kind": "content", "id": r["id"], "title": r["title"], "status": r["status"], "created_at": r["created_at"]})
+        if not user["is_external"]:
+            level = wf.clearance(user)
+            facts = c.execute(
+                "SELECT code, statement, access_level FROM facts WHERE statement LIKE ? ORDER BY code LIMIT 20", (like,)
+            ).fetchall()
+            rules = c.execute(
+                "SELECT r.code, r.title, r.text, g.access_level FROM rules r JOIN guidelines g ON g.id=r.guideline_id "
+                "WHERE r.title LIKE ? OR r.text LIKE ? ORDER BY r.code LIMIT 20", (like, like)
+            ).fetchall()
+            for f in facts:
+                if LEVELS[f["access_level"]] <= level:
+                    visible.append({"kind": "fact", "id": f["code"], "title": f["code"], "snippet": f["statement"], "access_level": f["access_level"]})
+            for r in rules:
+                if LEVELS[r["access_level"]] <= level:
+                    visible.append({"kind": "rule", "id": r["code"], "title": r["title"], "snippet": r["text"], "access_level": r["access_level"]})
+        return jsonify(results=visible[:40])
+
     @app.get("/api/ops/metrics")
     def ops_metrics():
         """Admin-only operational dashboard. No prompt or content payloads are returned."""

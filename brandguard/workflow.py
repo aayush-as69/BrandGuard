@@ -72,7 +72,7 @@ def clearance(user: dict) -> int:
     """How much of the knowledge base this user may browse."""
     if user["is_external"]:
         return -1  # no browsing at all
-    return ACCESS_LEVELS["internal"] if user["role"] == "creator" else ACCESS_LEVELS["confidential"]
+    return ACCESS_LEVELS["internal"] if user["role"] == "creator" else ACCESS_LEVELS["restricted"]
 
 
 def source_key(source_type: str, source_id: str) -> str:
