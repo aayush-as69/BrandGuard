@@ -9,7 +9,7 @@
 # Privacy and data retention
 
 ## What is stored
-Content text and image metadata, findings, comments, decisions and an audit trail, in the database you control. Accounts store a name,
+Content text, image metadata and pixel measurements (colour shares, logo box, contrast; not the image itself), findings, comments, decisions and an audit trail, in the database you control. Accounts store a name,
 email, role and a password hash. Nothing is sent anywhere unless the AI judge is switched on.
 
 ## The demo login

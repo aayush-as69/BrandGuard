@@ -34,8 +34,9 @@ refused before parsing if its parts would unzip to over 50 MB or more than 100 t
 **AI.** Output is verified: a finding must quote a real rule and real text from the content or it is dropped. AI findings are labelled,
 capped at medium confidence, never auto-applied. See PRIVACY.md.
 
-**Images.** An uploaded image is read on the server (Pillow): its size, and an *estimated* background and text colour from the pixels, which feed
-the contrast check. The estimate is the most common colour and the one that contrasts most with it, so the author should confirm it. Alt text is
+**Images.** An uploaded image is decoded on the server (Pillow, size and pixel limits checked first) and measured with numpy: brand-palette share, logo
+shape, clear space and text contrast (see QUALITY.md). Measurements are stored per uploader and can only be attached to content by that user; the image
+itself is not stored. The text colour is an estimate unless typed, so the author should confirm it. Alt text is
 still typed by the author, and BrandGuard does not recognise what a picture shows (wrong logo, wrong product); a vision model for that is future work.
 
 **Out of scope today:** forced multi-factor sign-in, encryption at rest by the app (use an encrypted volume), per-tenant isolation (one database serves one

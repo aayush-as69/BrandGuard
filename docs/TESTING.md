@@ -8,9 +8,15 @@
 
 # Testing guide
 
-`python -m pytest -q` runs everything automated (about 190 tests, including real-browser tests in `tests/e2e` that skip if
+`python -m pytest -q` runs everything automated (about 285 tests, including real-browser tests in `tests/e2e` that skip if
 Chromium is not installed). `python -m pytest -q -m live` runs the live-provider tests; they need `ANTHROPIC_API_KEY`, use synthetic
 Brewline text only, and also run from GitHub Actions (**Live AI check**, manual). The full path they cover is in `tests/test_ai_privacy.py`.
+
+## Quality tests
+
+`tests/test_quality.py` (benchmark, learning loop), `tests/test_rewrite.py` (checked rewrites) and `tests/test_pixels.py` (palette, logo and
+contrast measured from the sample banners in `seed/`) need no network. The live AI rewrite and judge paths are covered only by the stub unless
+you run the live tests.
 
 ## Demo login and role-switch smoke test
 

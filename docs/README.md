@@ -6,6 +6,7 @@ Use this folder as the technical reference for operating and validating BrandGua
 |---|---|
 | [Deployment](DEPLOYMENT.md) | Environment modes, first deployment, proxy setup, health checks, migrations, monitoring, backups, and restore |
 | [Testing](TESTING.md) | Automated and live-provider tests, smoke testing, accessibility checks, and restore drills |
+| [Quality](QUALITY.md) | Checked rewrites, measured image checks, the quality benchmark and the learning loop |
 | [Security](SECURITY.md) | Accounts, sessions, roles, source access, request protections, upload limits, and known boundaries |
 | [Privacy](PRIVACY.md) | Stored data, AI provider disclosure, masking, logging, retention, and deletion |
 
