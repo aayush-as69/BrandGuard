@@ -309,12 +309,15 @@ def import_settings(conn: sqlite3.Connection, settings: dict) -> int:
     if unknown:
         raise ValueError(f"Unknown setting(s): {', '.join(map(str, unknown))}. Only 'rule_checks' is used.")
     for name, cfg in checks.items():
-        for key in ("max", "min_len", "max_len", "min_ratio"):
+        for key in ("max", "min_len", "max_len", "min_ratio", "tolerance", "max_off_share", "min_width_pct", "clear_ratio"):
             if key in cfg and (isinstance(cfg[key], bool) or not isinstance(cfg[key], (int, float))
                                or not math.isfinite(cfg[key]) or cfg[key] < 0):
                 raise ValueError(f"rule_checks.{name}.{key} must be a number that is not negative")
         if "allow" in cfg and not (isinstance(cfg["allow"], list) and all(isinstance(x, str) for x in cfg["allow"])):
             raise ValueError(f"rule_checks.{name}.allow must be a list of text")
+        for key in ("colours", "ink"):
+            if key in cfg and not (isinstance(cfg[key], list) and cfg[key] and all(isinstance(x, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", x) for x in cfg[key])):
+                raise ValueError(f"rule_checks.{name}.{key} must be a list of #RRGGBB colours")
         if "rule_code" in cfg and not isinstance(cfg["rule_code"], str):
             raise ValueError(f"rule_checks.{name}.rule_code must be text")
         if cfg.get("min_len", 0) > cfg.get("max_len", float("inf")):

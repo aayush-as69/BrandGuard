@@ -16,7 +16,8 @@ class ImageError(ValueError):
     pass
 
 
-def analyse(data: bytes) -> dict:
+def open_image(data: bytes):
+    """Decode an uploaded image safely (size and pixel limits checked before decoding). Returns an RGBA PIL image."""
     try:
         from PIL import Image
     except ImportError as exc:  # pragma: no cover - Pillow is a declared dependency
@@ -36,6 +37,13 @@ def analyse(data: bytes) -> dict:
         raise
     except Exception as exc:
         raise ImageError("That file is not an image this server can read (use PNG, JPEG, GIF or WebP)") from exc
+    return img
+
+
+def analyse(data: bytes, img=None) -> dict:
+    from PIL import Image
+    img = (img if img is not None else open_image(data)).copy()
+    width, height = img.size
     img.thumbnail((160, 160))
     flat = Image.new("RGB", img.size, (255, 255, 255))
     flat.paste(img, mask=img.split()[3])  # transparent areas read as white

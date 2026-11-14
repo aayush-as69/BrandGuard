@@ -518,22 +518,93 @@ class _Review:
         need = float(self.kb.checks["contrast"].get("min_ratio", 4.5))
         for img in self.images:
             fg, bg = img.get("text_color"), img.get("bg_color")
+            name = img.get("name", "image")
+            areas = ((img.get("measure") or {}).get("text") or {}).get("areas") or []
+            where, measured = "", False
+            if fg and areas:      # measured from the real pixels: the text colour against the background around each text area
+                scored = [(contrast_ratio(fg, a["bg"]), a) for a in areas]
+                scored = [(r, a) for r, a in scored if r is not None]
+                if scored:
+                    ratio, worst = min(scored, key=lambda t: t[0])
+                    bg, measured = worst["bg"], True
+                    where = f", measured at x={worst['x']}, y={worst['y']}"
             if not fg or not bg:
                 continue
-            ratio = contrast_ratio(fg, bg)
+            if not measured:
+                ratio = contrast_ratio(fg, bg)
             if ratio is None:
-                self.res.warnings.append(f"Contrast for '{img.get('name')}' not checked: invalid colour value.")
+                self.res.warnings.append(f"Contrast for '{name}' not checked: invalid colour value.")
                 continue
             if ratio < need:
-                name = img.get("name", "image")
+                fix = darken_to_pass(fg, bg, need)
                 self.raw.append(self.guideline_finding(
                     code, category="accessibility",
-                    issue=f"Text on '{name}' has contrast {ratio:.1f}:1 ({fg} on {bg}); the minimum is {need}:1.",
+                    issue=f"Text on '{name}' has contrast {ratio:.1f}:1 ({fg} on {bg}{where}); the minimum is {need}:1.",
                     span_text=name, target=f"image.text_color:{name}",
                     severity="medium", confidence="high",
-                    suggested_fix=darken_to_pass(fg, bg, need),
-                    fix_note="Suggested colour is the closest shade that passes.",
+                    suggested_fix=fix,
+                    fix_note="Suggested colour is the closest shade that passes." if fix
+                    else "Choose a text colour that contrasts more with the background behind it.",
                 ))
+
+    def check_palette(self) -> None:
+        """Share of an image's pixels in colours that are neither brand colours nor neutral (measured, not guessed)."""
+        code = self.cited("palette")
+        if not code:
+            return
+        cfg = self.kb.checks["palette"]
+        brand = cfg.get("colours") or []
+        tol, limit = float(cfg.get("tolerance", 14)), float(cfg.get("max_off_share", 0.12))
+        from . import pixels
+        for img in self.images:
+            cols = (img.get("measure") or {}).get("colours")
+            if not cols or not brand:
+                continue
+            off = [c for c in cols if not pixels.is_neutral(c["hex"]) and min(pixels.delta_e(c["hex"], b) for b in brand) > tol]
+            share = sum(c["share"] for c in off)
+            if share > limit:
+                name = img.get("name", "image")
+                biggest = ", ".join(f"{c['hex'].upper()} ({c['share'] * 100:.0f}%)" for c in sorted(off, key=lambda c: -c["share"])[:3])
+                self.raw.append(self.guideline_finding(
+                    code, category="visual", span_text=name, target=f"image.palette:{name}",
+                    issue=f"{share * 100:.0f}% of '{name}' is outside the brand palette (largest: {biggest}); the limit is {limit * 100:.0f}%.",
+                    severity="medium", confidence="high",
+                    fix_note=f"Recolour those areas with {', '.join(b.upper() for b in brand)} or a neutral.",
+                ))
+
+    def check_logo(self) -> None:
+        """For images the author marked as carrying the logo: is it there, big enough and clear of other content."""
+        code = self.cited("logo")
+        if not code:
+            return
+        cfg = self.kb.checks["logo"]
+        min_pct, clear_ratio = float(cfg.get("min_width_pct", 15)), float(cfg.get("clear_ratio", 0.5))
+        for img in self.images:
+            if not img.get("logo"):
+                continue
+            name = img.get("name", "image")
+            m = img.get("measure") or {}
+            if m.get("logo") is None:
+                self.res.warnings.append(f"Logo in '{name}' not checked: read the image file to measure it.")
+                continue
+            lg, base = m["logo"], dict(category="visual", span_text=name, target=f"image.logo:{name}", severity="medium", confidence="medium")
+            if not lg.get("found"):
+                self.raw.append(self.guideline_finding(
+                    code, **base, issue=f"The logo was not found in '{name}', but the image is marked as carrying it.",
+                    fix_note="Place the primary logo in Espresso or Crema, whole and unaltered."))
+                continue
+            pct = lg["w"] / m["width"] * 100
+            need = clear_ratio * lg["h"]
+            tight = {k: v for k, v in lg["clear"].items() if v < need}
+            if pct < min_pct:
+                self.raw.append(self.guideline_finding(
+                    code, **base, issue=f"The logo in '{name}' is {pct:.0f}% of the image width ({lg['w']}px of {m['width']}px); the minimum is {min_pct:.0f}%.",
+                    fix_note="Enlarge the logo."))
+            elif tight:
+                sides = ", ".join(f"{k} {v}px" for k, v in tight.items())
+                self.raw.append(self.guideline_finding(
+                    code, **base, issue=f"The logo in '{name}' has too little clear space ({sides}); it needs {need:.0f}px, half its height, on every side.",
+                    fix_note="Move other content away from the logo."))
 
     # -- 5. finishing: tidy fixes, verify, add AI suggestions, order, cap ---------------------
     def capitalise_fixes(self) -> None:
@@ -592,7 +663,7 @@ def review(
     a fix does not send the content to the AI service again."""
     r = _Review(kb, body, images)
     for check in (r.check_glossary, r.check_exclamations, r.check_capitals, r.check_facts,
-                  r.check_claims, r.check_alt_text, r.check_contrast):
+                  r.check_claims, r.check_alt_text, r.check_contrast, r.check_palette, r.check_logo):
         check()
     r.capitalise_fixes()
     r.verify_rule_findings()
