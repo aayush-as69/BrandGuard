@@ -5,7 +5,8 @@ import pytest
 
 from conftest import ARJUN, IRA, NEHA, RAHUL
 
-SECRET = "Never mention the competitor Rivalbrew in any copy."\nRESTRICTED = "Do not reveal the private launch sequence for Project Ember."
+SECRET = "Never mention the competitor Rivalbrew in any copy."
+RESTRICTED = "Do not reveal the private launch sequence for Project Ember."
 
 
 @pytest.fixture()
