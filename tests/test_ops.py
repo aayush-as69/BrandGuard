@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from brandguard import db, retention
-from conftest import IRA, NEHA, Session
+from conftest import ARJUN, IRA, NEHA, Session
 
 ROOT = Path(__file__).resolve().parents[1]
 
