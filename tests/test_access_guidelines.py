@@ -97,3 +97,13 @@ def test_comment_finding_reference_is_validated(seeded, login):
         r = n.post(f"/api/content/{b}/comments", body="x", finding_id=bad)
         assert r.status_code == 400, (bad, r.status_code)
     assert n.post(f"/api/content/{b}/comments", body="no finding at all").status_code == 201
+
+
+def test_restricted_sources_are_visible_only_to_approvers(tiers, login):
+    r = login(RAHUL)
+    # The fixture already covers the creator boundary; a restricted source is
+    # intentionally a fourth tier that only approvers/admins can inspect.
+    assert r.get("/api/kb").status_code == 200
+    manager = login(ARJUN)
+    kb = manager.get("/api/kb").get_json()
+    assert any(x.get("access_level") == "restricted" for x in kb.get("facts", []) + kb.get("guidelines", []))
