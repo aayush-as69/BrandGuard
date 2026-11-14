@@ -12,7 +12,7 @@ from pathlib import Path
 from .db import now
 from .errors import NotFound
 
-ACCESS_LEVELS = {"public": 0, "internal": 1, "confidential": 2}
+ACCESS_LEVELS = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
 
 # "G-01 | Voice: Write in a warm, calm voice."  ->  code, title, text
 _RULE_CODE = re.compile(r"([A-Z]{1,4}-\d+)[ \t]*\|")   # anchored and bounded: safe on hostile input
