@@ -1,7 +1,6 @@
 """Flask app: JSON API plus the single-page review UI."""
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import os
@@ -16,20 +15,18 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import benchmark as bench
 from . import db as dbm
 from . import insights
-from . import learning
-from . import engine
 from . import imaging
-from . import pixels
 from . import record
 from . import throttle
 from . import totp
 from . import vault
+from . import versions as rv
+from . import benchmark as bm
+from . import rewrite as rw
 from . import kb as kbm
 from . import llm
-from . import metrics
 from . import workflow as wf
 from .errors import Forbidden, NotFound, RateLimited
 
@@ -253,7 +250,6 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     def guard_origin():
         """Refuse cross-site writes: a state-changing request must come from this site."""
         g.t0 = time.perf_counter()
-        g.request_id = secrets.token_hex(8)
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if request.headers.get("Sec-Fetch-Site") == "cross-site":
                 return jsonify(error="Cross-site request refused"), 403
@@ -285,10 +281,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             print(json.dumps({
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "method": request.method, "path": request.path,
                 "status": resp.status_code, "user": session.get("uid"),
-                "request_id": g.get("request_id", ""),
                 "ms": round((time.perf_counter() - g.get("t0", time.perf_counter())) * 1000, 1)}), flush=True)
-        if g.get("request_id"):
-            resp.headers["X-Request-ID"] = g.request_id
         return resp
 
     @app.after_request
@@ -308,43 +301,43 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.errorhandler(AuthError)
     def _auth(e):
-        return jsonify(error=str(e), request_id=g.get("request_id", "")), 401
+        return jsonify(error=str(e)), 401
 
     @app.errorhandler(Forbidden)
     def _perm(e):
-        return jsonify(error=str(e), request_id=g.get("request_id", "")), 403
+        return jsonify(error=str(e)), 403
 
     @app.errorhandler(NotFound)
     def _missing(e):
-        return jsonify(error=str(e) or "Not found", request_id=g.get("request_id", "")), 404
+        return jsonify(error=str(e) or "Not found"), 404
 
     @app.errorhandler(RateLimited)
     def _limited(e):
-        return jsonify(error=str(e), request_id=g.get("request_id", "")), 429
+        return jsonify(error=str(e)), 429
 
     @app.errorhandler(HTTPException)
     def _http(e):
         if not request.path.startswith("/api/"):
             return e
         msg = "That file is too large (limit 10 MB)" if e.code == 413 else (e.description or e.name)
-        return jsonify(error=msg, request_id=g.get("request_id", "")), e.code
+        return jsonify(error=msg), e.code
 
     @app.errorhandler(Exception)
     def _unexpected(e):
         # A genuine bug (KeyError, TypeError, ...) is a 500 that is logged, never dressed up as a 404.
         app.logger.exception("Unhandled error on %s %s", request.method, request.path)
-        return jsonify(error="Something went wrong on the server.", request_id=g.get("request_id", "")), 500
+        return jsonify(error="Something went wrong on the server."), 500
 
     @app.errorhandler(ValueError)
     def _bad(e):
-        return jsonify(error=str(e), request_id=g.get("request_id", "")), 400
+        return jsonify(error=str(e)), 400
 
     @app.errorhandler(sqlite3.IntegrityError)
     def _integrity(e):
         app.logger.warning("integrity error on %s %s: %s", request.method, request.path, e)  # detail stays on the server
         if "users.email" in str(e) or "idx_users_email" in str(e):
             return jsonify(error="That email address is already in use"), 400
-        return jsonify(error="That change conflicts with existing data and was not saved", request_id=g.get("request_id", "")), 400
+        return jsonify(error="That change conflicts with existing data and was not saved"), 400
 
     # -------------------------------------------------------------------- pages
     @app.get("/")
@@ -497,34 +490,14 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.post("/api/image/analyze")
     def image_analyze():
-        user = me()
+        me()
         f = request.files.get("image")
         if not f:
             raise ValueError("Attach an image file")
-        data = f.read(imaging.MAX_BYTES + 1)
         try:
-            img = imaging.open_image(data)
-            out = imaging.analyse(data, img)
+            return jsonify(imaging.analyse(f.read(imaging.MAX_BYTES + 1)))
         except imaging.ImageError as exc:
             raise ValueError(str(exc))
-        text = request.form.get("text_color", "").strip() or out["text_color"]
-        kb = engine.load_kb(conn())
-        logo_cfg = kb.checks.get("logo")
-        measure = pixels.measure(img, logo_cfg if logo_cfg is not None else None, text)
-        cur = conn().execute("INSERT INTO image_checks(user_id, sha256, name, created_at, measure) VALUES (?,?,?,?,?)",
-                             (user["id"], hashlib.sha256(data).hexdigest(), (f.filename or "")[:200], dbm.now(), json.dumps(measure)))
-        conn().commit()
-        logo = measure.get("logo")
-        out.update(check_id=cur.lastrowid, logo=None if logo is None else bool(logo["found"]),
-                   note=out["note"] + " The image was also measured: colours, logo and the contrast of text-coloured areas.")
-        return jsonify(out)
-
-    @app.get("/api/image/sample/<name>")
-    def image_sample(name):
-        me()
-        if name not in ("ok", "bad"):
-            raise NotFound("No such sample")
-        return send_from_directory(ROOT / "seed", f"sample-banner-{name}.png", mimetype="image/png")
 
     @app.post("/api/mfa/setup")
     def mfa_setup():
@@ -677,13 +650,139 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         c = conn()
         if request.method == "PATCH":
             patch = payload()
+            if kind == "rules":
+                rv.sync(c, key, user["id"])      # keep what was live before this edit in the history
             update(c, key, patch)
+            if kind == "rules":
+                rv.sync(c, key, user["id"], "Edited directly in the knowledge base")
             wf.audit(c, None, user["id"], "kb_edited", f"{kind}/{key}: {', '.join(sorted(patch))}")
         else:
             delete(c, key)
+            if kind == "rules":
+                rv.forget(c, key)
             wf.audit(c, None, user["id"], "kb_deleted", f"{kind}/{key}")
         c.commit()
         return jsonify(ok=True)
+
+    # ------------------------------------------------ guideline rule versions (admin only)
+    def rule_admin() -> dict:
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can manage guideline versions")
+        return user
+
+    @app.get("/api/kb/rules/<code>/versions")
+    def rule_versions(code: str):
+        rule_admin()
+        return jsonify(rv.list_versions(conn(), code))
+
+    @app.get("/api/kb/rules/<code>/compare")
+    def rule_compare(code: str):
+        rule_admin()
+        try:
+            a, b = int(request.args.get("from", "")), int(request.args.get("to", ""))
+        except ValueError:
+            raise ValueError("Choose two versions to compare") from None
+        return jsonify(rv.compare(conn(), code, a, b))
+
+    @app.post("/api/kb/rules/<code>/draft")
+    def rule_save_draft(code: str):
+        user, body, c = rule_admin(), payload(), conn()
+        n = rv.save_draft(c, code, user["id"], body.get("text"), body.get("title"), body.get("note"))
+        wf.audit(c, None, user["id"], "rule_draft_saved", f"{code}: draft v{n}")
+        c.commit()
+        return jsonify(version=n)
+
+    @app.delete("/api/kb/rules/<code>/draft")
+    def rule_discard_draft(code: str):
+        user, c = rule_admin(), conn()
+        rv.discard_draft(c, code)
+        wf.audit(c, None, user["id"], "rule_draft_discarded", code)
+        c.commit()
+        return jsonify(ok=True)
+
+    @app.post("/api/kb/rules/<code>/publish")
+    def rule_publish(code: str):
+        user, c = rule_admin(), conn()
+        n = rv.publish(c, code, user["id"])
+        wf.audit(c, None, user["id"], "rule_published", f"{code}: v{n} is now live")
+        c.commit()
+        return jsonify(version=n)
+
+    @app.post("/api/kb/rules/<code>/rollback")
+    def rule_rollback(code: str):
+        user, body, c = rule_admin(), payload(), conn()
+        try:
+            target = int(body.get("version"))
+        except (TypeError, ValueError):
+            raise ValueError("Choose which version to roll back to") from None
+        n = rv.rollback(c, code, target, user["id"])
+        wf.audit(c, None, user["id"], "rule_rolled_back", f"{code}: v{target} republished as v{n}")
+        c.commit()
+        return jsonify(version=n)
+
+    # ------------------------------------------------ accuracy benchmark (admin only)
+    def bench_admin() -> dict:
+        user = me()
+        if user["role"] != "admin":
+            raise Forbidden("Only an admin can use the benchmark")
+        return user
+
+    @app.get("/api/benchmark")
+    def benchmark_overview():
+        bench_admin()
+        c = conn()
+        return jsonify(cases=bm.list_cases(c), runs=bm.list_runs(c))
+
+    @app.post("/api/benchmark/cases")
+    def benchmark_add_cases():
+        user, body, c = bench_admin(), payload(), conn()
+        n = bm.add_cases(c, user["id"], body.get("cases"))
+        wf.audit(c, None, user["id"], "benchmark_cases_added", f"{n} case(s)")
+        c.commit()
+        return jsonify(added=n)
+
+    @app.post("/api/benchmark/seed")
+    def benchmark_seed():
+        user, c = bench_admin(), conn()
+        demo = json.loads((ROOT / "seed" / "benchmark.json").read_text(encoding="utf-8"))
+        have = {r["title"] for r in c.execute("SELECT title FROM benchmark_cases")}
+        fresh = [x for x in demo if x["title"] not in have]
+        n = bm.add_cases(c, user["id"], fresh) if fresh else 0
+        wf.audit(c, None, user["id"], "benchmark_seeded", f"{n} demo case(s)")
+        c.commit()
+        return jsonify(added=n)
+
+    @app.delete("/api/benchmark/cases/<int:case_id>")
+    def benchmark_delete_case(case_id: int):
+        user, c = bench_admin(), conn()
+        bm.delete_case(c, case_id)
+        wf.audit(c, None, user["id"], "benchmark_case_deleted", str(case_id))
+        c.commit()
+        return jsonify(ok=True)
+
+    @app.post("/api/benchmark/run")
+    def benchmark_run():
+        user, body, c = bench_admin(), payload(), conn()
+        run = bm.run(c, user["id"], body.get("label", ""))
+        s = run["summary"]
+        wf.audit(c, None, user["id"], "benchmark_run", f"run {run['id']}: {s['cases']} cases, precision {s['precision']}, recall {s['recall']}")
+        c.commit()
+        return jsonify(run)
+
+    @app.get("/api/benchmark/runs/<int:run_id>")
+    def benchmark_get_run(run_id: int):
+        bench_admin()
+        return jsonify(bm.get_run(conn(), run_id))
+
+    @app.get("/api/benchmark/compare")
+    def benchmark_compare():
+        bench_admin()
+        try:
+            a, b = int(request.args.get("before", "")), int(request.args.get("after", ""))
+        except ValueError:
+            raise ValueError("Choose two runs to compare") from None
+        return jsonify(bm.compare(conn(), a, b))
 
     @app.post("/api/kb/seed")
     def kb_seed():
@@ -831,25 +930,20 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise Forbidden("Approved content is locked")
         return jsonify(wf.run_review(conn(), cid, judge_factory, ai_mode(request.get_json(silent=True) or {})))
 
+    @app.get("/api/content/<int:cid>/rewrites")
+    def content_rewrites(cid: int):
+        """Minimal / Balanced / Full rewrites. Options that fail their safety checks come back hidden, with no text."""
+        return jsonify(rw.build(conn(), me(), cid))
+
+    @app.post("/api/content/<int:cid>/rewrites/<strength>/apply")
+    def content_rewrite_apply(cid: int, strength: str):
+        return jsonify(rw.apply(conn(), me(), cid, strength, judge_factory))
+
     @app.post("/api/findings/<int:fid>/decide")
     def finding_decide(fid: int):
         data = payload()
-        out = wf.decide(conn(), me(), fid, data.get("action"), data.get("text"), data.get("reason"), judge_factory,
-                        data.get("strength"))
+        out = wf.decide(conn(), me(), fid, data.get("action"), data.get("text"), data.get("reason"), judge_factory)
         return jsonify(out)
-
-    @app.post("/api/findings/<int:fid>/rewrites")
-    def finding_rewrites(fid: int):
-        """Checked rewrite options for a finding. {"use_ai": true} adds wording from the AI provider (masked text)."""
-        use_ai = payload().get("use_ai", False)
-        if not isinstance(use_ai, bool):
-            raise ValueError("use_ai must be true or false")
-        factory = None
-        if use_ai:
-            if not llm.ai_available(app.config["LLM_CALL"]):
-                raise ValueError("No AI provider is configured on this server")
-            factory = lambda c, cid, ver: llm.make_rewriter(c, cid, ver, call=app.config["LLM_CALL"])
-        return jsonify(wf.rewrite_options(conn(), me(), fid, factory))
 
     @app.post("/api/content/<int:cid>/comments")
     def content_comment(cid: int):
@@ -878,141 +972,6 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
             raise Forbidden("Insights are for your own managers, reviewers and admins")
         return jsonify(insights.compute(conn()))
-
-    # ------------------------------------------------------- quality and learning
-    def quality_viewer() -> dict:
-        user = me()
-        if user["role"] not in ("admin", "manager", "reviewer") or user["is_external"]:
-            raise Forbidden("Quality results are for your own managers, reviewers and admins")
-        return user
-
-    def quality_admin() -> dict:
-        user = me()
-        if user["role"] != "admin" or user["is_external"]:
-            raise Forbidden("Only an admin can run the benchmark or change the knowledge base")
-        return user
-
-    def quality_payload(c) -> dict:
-        latest = bench.latest(c)
-        if latest is None and not bench.pending(c):  # the rule-only run is instant, so there is always something to show
-            bench.save(c, None, bench.run(c), "First run")
-            latest = bench.latest(c)
-        return dict(benchmark=latest, history=bench.history(c), pending=bool(bench.pending(c)),
-                    failed=bench.last_failure(c), ai_available=llm.ai_available(app.config["LLM_CALL"]),
-                    suggestions=learning.suggestions(c, latest), changes=learning.changes(c))
-
-    @app.get("/api/quality")
-    def quality_view():
-        quality_viewer()
-        return jsonify(quality_payload(conn()))
-
-    @app.post("/api/benchmark/run")
-    def benchmark_run():
-        user = quality_admin()
-        use_ai = payload().get("use_ai", False)
-        if not isinstance(use_ai, bool):
-            raise ValueError("use_ai must be true or false")
-        c = conn()
-        if not use_ai:
-            bench.save(c, user["id"], bench.run(c), "Rules only")
-            wf.audit(c, None, user["id"], "benchmark_run", "rules only")
-            return jsonify(quality_payload(c))
-        if not llm.ai_available(app.config["LLM_CALL"]):
-            raise ValueError("No AI provider is configured on this server, so the AI judge cannot be measured.")
-        if bench.pending(c):
-            raise ValueError("A benchmark with the AI judge is already running. Reload in a minute.")
-        wf.audit(c, None, user["id"], "benchmark_run", "with the AI judge")
-
-        def work(run_id: int) -> None:
-            conn2 = dbm.connect(app.config["DB_PATH"])
-            try:
-                judge = llm.make_judge(conn2, None, None, call=app.config["LLM_CALL"])
-                bench.finish_pending(conn2, run_id, bench.run(conn2, judge=judge))
-            except Exception as exc:
-                app.logger.exception("AI benchmark failed")
-                bench.finish_pending(conn2, run_id, None, f"{type(exc).__name__}: {exc}")
-            finally:
-                conn2.close()
-
-        run_id = bench.start_pending(c, user["id"], "With AI judge")
-        if ai_async:
-            pool.submit(work, run_id)
-        else:
-            work(run_id)
-        return jsonify(quality_payload(c))
-
-    @app.post("/api/learning/apply")
-    def learning_apply():
-        user = quality_admin()
-        data = payload()
-        sid = data.get("suggestion")
-        if not isinstance(sid, str) or not sid:
-            raise ValueError("Say which suggestion to apply")
-        note = data.get("note")
-        if note is not None and not isinstance(note, str):
-            raise ValueError("note must be text")
-        c = conn()
-        out = learning.apply(c, user["id"], sid, note)
-        wf.audit(c, None, user["id"], "kb_learning_applied", out["summary"])
-        c.commit()
-        return jsonify({**out, **quality_payload(c)})
-
-    @app.post("/api/learning/undo")
-    def learning_undo():
-        user = quality_admin()
-        cid = payload().get("change_id")
-        if not isinstance(cid, int) or isinstance(cid, bool):
-            raise ValueError("Say which change to undo")
-        c = conn()
-        out = learning.revert(c, user["id"], cid)
-        wf.audit(c, None, user["id"], "kb_learning_undone", out["summary"])
-        c.commit()
-        return jsonify({**out, **quality_payload(c)})
-
-    @app.get("/api/search")
-    def search():
-        """Small cross-surface search, scoped to content ownership and KB clearance."""
-        user = me()
-        q = str(request.args.get("q", "")).strip()
-        if len(q) < 2:
-            return jsonify(results=[])
-        q = q[:120]
-        like = f"%{q}%"
-        c = conn()
-        rows = c.execute(
-            "SELECT id, title, status, author_id, created_at FROM content "
-            "WHERE (title LIKE ? OR id IN (SELECT content_id FROM versions WHERE body LIKE ?)) "
-            "ORDER BY id DESC LIMIT 20", (like, like)
-        ).fetchall()
-        visible = []
-        for r in rows:
-            if user["role"] == "creator" and r["author_id"] != user["id"]:
-                continue
-            visible.append({"kind": "content", "id": r["id"], "title": r["title"], "status": r["status"], "created_at": r["created_at"]})
-        if not user["is_external"]:
-            level = wf.clearance(user)
-            facts = c.execute(
-                "SELECT code, statement, access_level FROM facts WHERE statement LIKE ? ORDER BY code LIMIT 20", (like,)
-            ).fetchall()
-            rules = c.execute(
-                "SELECT r.code, r.title, r.text, g.access_level FROM rules r JOIN guidelines g ON g.id=r.guideline_id "
-                "WHERE r.title LIKE ? OR r.text LIKE ? ORDER BY r.code LIMIT 20", (like, like)
-            ).fetchall()
-            for f in facts:
-                if LEVELS[f["access_level"]] <= level:
-                    visible.append({"kind": "fact", "id": f["code"], "title": f["code"], "snippet": f["statement"], "access_level": f["access_level"]})
-            for r in rules:
-                if LEVELS[r["access_level"]] <= level:
-                    visible.append({"kind": "rule", "id": r["code"], "title": r["title"], "snippet": r["text"], "access_level": r["access_level"]})
-        return jsonify(results=visible[:40])
-
-    @app.get("/api/ops/metrics")
-    def ops_metrics():
-        """Admin-only operational dashboard. No prompt or content payloads are returned."""
-        user = me()
-        if user["role"] != "admin":
-            raise Forbidden("Admin access required")
-        return jsonify(metrics.dashboard(conn()))
 
     @app.get("/api/llm-log")
     def llm_log():

@@ -15,36 +15,40 @@ def palette():
     return dict(re.findall(r"--([\w-]+):(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3}))(?![0-9a-fA-F])", HTML))
 
 
-# Colours that appear only as literals in the CSS (chips, marks, diffs, quotes), keyed by what they sit behind.
-CHIP_BG = {"#1b1b46": "#a5b4fc", "#1c1c33": "#b8b6d9", "#33260a": "amber", "#3a0f24": "red", "#0c2e1f": "green", "#2a1550": "violet"}
-SURFACE_BG = ("#140f2e", "#07070f", "#1d1740")
-MARKS = ("#5b1236", "#5a3b05", "#1e3a6e")
-GRADIENT_STOPS = ("#6d28d9", "#2563eb", "#be185d")  # behind white text on primary buttons
+# Colour pairs that appear as literals beside the tokens (status chips, highlights, diffs, buttons).
+CHIP_PAIRS = [("success", "#10291f"), ("warning", "#2e2411"), ("danger", "#361a1f"), ("info", "#112539"),
+              ("danger", "#2a1519"), ("muted", "#2a1519"), ("text", "#4a2027"), ("text", "#41330f"), ("text", "#163450"),
+              ("#ffd6d9", "#361a1f"), ("#c7f5de", "#10291f"), ("text", "#252d3b"), ("muted", "#252d3b"),
+              ("primary-ink", "primary"), ("primary-ink", "primary-hover"), ("#06210f", "success"), ("#06210f", "#6bd6a1"), ("#2a0b0e", "danger"),
+              ("#2c2720", "#f3f0e8"), ("#6e1f26", "#f3c9c9")]
 
 
 def test_every_text_and_background_pair_meets_4_5_to_1():
     p = palette()
-    surfaces = [p["bg"], p["card"], p["sunk"], p["raised"]]
-    pairs = [(p["ink"], s) for s in surfaces] + [(p["mute"], s) for s in surfaces]
-    pairs += [(p[c], s) for c in ("accent", "green", "amber", "red", "violet") for s in (p["card"], p["sunk"])]
-    pairs += [("#ffffff", stop) for stop in GRADIENT_STOPS]                       # primary button text across the whole gradient
-    pairs += [("#052e16", p["green"]), ("#2a0612", p["red"]), (p["bg"], p["ink"])]  # good button, error toast, toast
-    pairs += [(fg if fg.startswith("#") else p[fg], bg) for bg, fg in CHIP_BG.items()]
-    pairs += [(p["ink"], bg) for bg in MARKS]                                      # highlighted text in a review
-    pairs += [("#ffd0e0", "#5b1236"), ("#bbf7d0", "#0c3b25"), (p["accent"], "#140f2e"), (p["ink"], "#140f2e"),
-              ("#ddd6fe", "#1d1740"), (p["ink"], "#07070f"), ("#8d8ab4", p["sunk"]),
-              ("#c4b5fd", p["bg"]), ("#93c5fd", p["bg"]), ("#f9a8d4", p["bg"]), ("#c4b5fd", p["card"])]   # links, gradient text
+    surfaces = [p[k] for k in ("bg", "surface", "elevated", "sunk")]
+    pairs = [(p[c], s) for c in ("text", "muted", "link", "success", "warning", "danger", "info") for s in surfaces]
+    pairs += [(p["bg"], p["text"])]                                                # toast
+    res = lambda v: p.get(v, v)
+    pairs += [(res(fg), res(bg)) for fg, bg in CHIP_PAIRS]
     failures = [(fg, bg, round(contrast_ratio(fg, bg), 2)) for fg, bg in pairs if contrast_ratio(fg, bg) < 4.5]
     assert not failures, failures
-    for literal in list(CHIP_BG) + list(SURFACE_BG) + list(MARKS) + list(GRADIENT_STOPS) + ["#0c3b25", "#8d8ab4", "#c4b5fd", "#93c5fd", "#f9a8d4"]:
+    for literal in {v for pair in CHIP_PAIRS for v in pair if v.startswith("#")}:
         assert literal in HTML, literal  # the pairs above really are the ones used in the CSS
+    for name in ("--bg", "--surface", "--elevated", "--sunk", "--border", "--primary", "--success", "--warning", "--danger", "--info", "--muted", "--text"):
+        assert name + ":" in HTML, name  # the semantic tokens exist
+
+
+def test_severity_never_relies_on_colour_alone():
+    assert "SEV={high:['\u25b2','High']" in JS.replace("▲", "\u25b2") and "const sev=" in JS
+    assert "</style>" not in HTML and "alert(" not in JS and "confirm(" not in JS and "prompt(" not in JS
 
 
 def test_form_controls_have_accessible_names():
     inputs = re.findall(r"<(?:input|select|textarea)\b[^>]*>", HTML)
-    unnamed = [i for i in inputs if "aria-label" not in i and "id=" not in i]
+    # Dialog fields are built from one template whose id is paired with a <label for>; a checkbox is named by its wrapping label.
+    unnamed = [i for i in inputs if "aria-label" not in i and "id=" not in i and "${common}" not in i and 'type="checkbox"' not in i]
     assert not unnamed, unnamed
-    assert 'role="status"' in HTML and "aria-live" in HTML
+    assert 'for="${id}"' in HTML and 'role="status"' in HTML and "aria-live" in HTML
 
 
 def test_tour_exists_and_only_calls_real_endpoints(app):

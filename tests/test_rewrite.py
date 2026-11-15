@@ -1,263 +1,159 @@
-"""Rewrite options: three strengths, two checks, a diff, and the AI only on masked text."""
+"""Three-strength rewrites: what each strength changes, the safety checks, hiding and applying."""
 import json
 
-import pytest
+from conftest import ARJUN, IRA, MEERA, NEHA, RAHUL
 
-from brandguard import engine, rewrite as rw
-from brandguard.app import create_app
-from conftest import ARJUN, IRA, MEERA, NEHA, RAHUL, Session
-
-BODY = "Dude, our new Signature Blend is insanely good!!!\n\nGrab a 250g pouch for just ₹399. Launching on 1 December 2026."
+from brandguard import rewrite as rw
 
 
-def draft(s, body=BODY, images=None):
-    cid = s.post("/api/content", title="t", body=body, images=images or []).get_json()["id"]
-    return cid, s.get(f"/api/content/{cid}").get_json()
+def make(session, demo):
+    r = session.post("/api/content", title=demo["title"], body=demo["body"], images=demo["images"])
+    assert r.status_code == 201
+    return r.get_json()["id"]
 
 
-def finding(d, text):
-    return next(f for f in d["findings"] if f["span_text"] == text)
+def opts(session, cid):
+    d = session.get(f"/api/content/{cid}/rewrites").get_json()
+    return {o["strength"]: o for o in d["options"]}
 
 
-def opts(s, f, ai=False):
-    r = s.post(f"/api/findings/{f['id']}/rewrites", use_ai=ai)
-    assert r.status_code == 200, r.get_json()
-    return r.get_json()
+def make_text(session, body, title="Test"):
+    return session.post("/api/content", title=title, body=body, images=[]).get_json()["id"]
 
 
-# ------------------------------------------------------------------ rules-based options
-def test_a_finding_with_neighbours_gets_more_than_one_strength(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    o = opts(n, finding(d, "Dude"))
-    assert [x["strength"] for x in o["options"]][:2] == ["minimal", "balanced"]
-    assert o["options"][0]["after"] == "Hello"
-    assert o["options"][1]["after"] == "Hello, our new Signature Blend is wonderful!"  # whole sentence, every fix in it
-    assert all(x["source"] == "rules" for x in o["options"])
+def test_each_strength_adds_more_and_none_changes_a_price_wrongly(seeded, login, demo):
+    s = login(NEHA)
+    o = opts(s, make(s, demo))
+    n = {k: len(v["changes"]) for k, v in o.items()}
+    assert 0 < n["minimal"] < n["balanced"] <= n["full"]
+    assert all(v["status"] == "ok" for v in o.values())
+    assert "₹449" in o["minimal"]["body"] and "₹399" not in o["minimal"]["body"]
+    assert "1 December 2026" in o["minimal"]["body"]                           # F-02 is restricted for Neha, so it is never used for her
+    assert all(c["source_id"] != "F-02" for c in o["full"]["changes"])
+    m = opts(login(ARJUN), s.get("/api/content").get_json()[0]["id"])           # a manager sees the launch date and gets that fix too
+    assert "1 December 2026" not in m["minimal"]["body"] and "15 December 2026" in m["minimal"]["body"]
+    assert "!!!" in o["minimal"]["body"] and "!!!" not in o["full"]["body"]     # polish only arrives in Full
+    assert "Dude" in o["minimal"]["body"] and "Dude" not in o["balanced"]["body"]  # slang is a wording fix: Balanced
 
 
-def test_the_full_strength_fixes_the_paragraph(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n, "Grab a 250g pouch for just \u20b9399. It is a cheap price for Signature Blend.\n\nLaunching on 1 December 2026.")
-    o = opts(n, finding(d, "\u20b9399"))
-    assert [x["strength"] for x in o["options"]] == ["minimal", "full"]   # the sentence option equals the minimal one, so it is not repeated
-    full = o["options"][1]
-    assert full["after"] == "Grab a 250g pouch for just \u20b9449. It is an affordable price for Signature Blend."
-    assert "1 December" not in json.dumps(o)  # the next paragraph and its restricted finding are left alone
+def test_minimal_contains_only_high_severity_rule_based_high_confidence_fixes(seeded, login, demo):
+    s = login(NEHA)
+    o = opts(s, make(s, demo))
+    assert all(c["severity"] == "high" and not c["ai_generated"] for c in o["minimal"]["changes"])
 
 
-def test_every_option_carries_a_diff_that_rebuilds_both_sides(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    for x in opts(n, finding(d, "Dude"))["options"]:
-        assert "".join(p["text"] for p in x["diff"] if p["op"] != "ins") == x["before"]
-        assert "".join(p["text"] for p in x["diff"] if p["op"] != "del") == x["after"]
-        assert any(p["op"] != "equal" for p in x["diff"])
+def test_every_option_passes_all_six_checks_and_shows_them(seeded, login, demo):
+    s = login(NEHA)
+    o = opts(s, make(s, demo))["full"]
+    assert [c["id"] for c in o["checks"]] == ["numbers", "facts", "clean", "support", "length", "nonempty"]
+    assert all(c["ok"] for c in o["checks"])
+    assert any(seg["op"] == "added" for seg in o["diff"]) and any(seg["op"] == "removed" for seg in o["diff"])
+    assert "".join(seg["text"] for seg in o["diff"] if seg["op"] != "removed") == o["body"]
 
 
-def test_applying_an_option_resolves_the_finding_and_makes_a_new_version(seeded, login):
-    n = login(NEHA)
-    cid, d = draft(n)
-    f = finding(d, "Dude")
-    o = next(x for x in opts(n, f)["options"] if x["strength"] == "balanced")
-    r = n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="balanced", text=o["after"])
-    assert r.status_code == 200 and r.get_json()["new_version"] == 2
-    d2 = n.get(f"/api/content/{cid}").get_json()
-    assert d2["body"].startswith("Hello, our new Signature Blend is wonderful!\n\n")
-    left = {x["span_text"] for x in d2["findings"] if x["decision"] == "open"}
-    assert "Dude" not in left and "insanely good" not in left and "!!!" not in left
-    assert any("rewrite (balanced)" in str(a) for a in login(ARJUN).get(f"/api/content/{cid}").get_json()["audit"])
+def test_an_option_identical_to_a_smaller_one_says_so(seeded, login):
+    s = login(NEHA)
+    o = opts(s, make_text(s, "The 250g pouch is only ₹399 this week."))
+    assert o["minimal"]["same_as"] is None and o["balanced"]["same_as"] == "minimal" and o["full"]["same_as"] == "minimal"
 
 
-def test_nothing_changes_until_the_author_clicks(seeded, login):
-    n = login(NEHA)
-    cid, d = draft(n)
-    opts(n, finding(d, "Dude"))
-    assert n.get(f"/api/content/{cid}").get_json()["body"] == BODY
+def test_clean_content_has_no_options_to_offer(seeded, login):
+    s = login(NEHA)
+    o = opts(s, make_text(s, "Hello friend. The 250g pouch is ₹449."))
+    assert {v["status"] for v in o.values()} == {"none"}
 
 
-def test_a_finding_with_no_safe_rewrite_says_so(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n, "Visit us.", [{"name": "hero.png", "alt": "", "text_color": "#222222", "bg_color": "#ffffff"}])
-    f = next(x for x in d["findings"] if x["target"].startswith("image.alt"))
-    o = opts(n, f)
-    assert o["options"] == [] and "No safe rewrite" in o["note"]
+def test_low_confidence_findings_are_never_applied(seeded, login):
+    s = login(NEHA)
+    cid = make_text(s, "Free delivery above ₹999.")                          # guessed price: low confidence, needs a person
+    d = s.get(f"/api/content/{cid}").get_json()
+    assert any(f["confidence"] == "low" for f in d["findings"])
+    assert {v["status"] for v in opts(s, cid).values()} == {"none"}
 
 
-# ------------------------------------------------------------------ the checks, on the server
-def test_a_tampered_rewrite_that_adds_a_violation_is_refused(seeded, login):
-    n = login(NEHA)
-    cid, d = draft(n)
-    f = finding(d, "Dude")
-    r = n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="minimal", text="Bhai")
-    assert r.status_code == 400 and "new finding" in r.get_json()["error"]
-    assert n.get(f"/api/content/{cid}").get_json()["body"] == BODY
+def test_an_unsafe_glossary_fix_is_hidden_and_cannot_be_applied(seeded, login):
+    """An admin sets the preferred wording for 'cheap' to a different price. Rewriting would slip a wrong fact in."""
+    ira = login(IRA)
+    fd = {"kind": "glossary", "text": json.dumps([{"term": "bargain", "preferred": "₹399 priced", "kind": "banned", "rule_code": "G-03"}])}
+    assert ira.c.post("/api/kb/import", data=fd).status_code == 200
+    s = login(NEHA)
+    cid = make_text(s, "A bargain way to start your morning.")
+    o = opts(s, cid)
+    assert o["balanced"]["status"] == "hidden" and o["balanced"]["body"] == "" and o["balanced"]["changes"] == []
+    assert any(not c["ok"] for c in o["balanced"]["checks"])
+    r = s.post(f"/api/content/{cid}/rewrites/balanced/apply")
+    assert r.status_code == 400 and "safety checks" in r.get_json()["error"]
+    assert s.get(f"/api/content/{cid}").get_json()["content"]["current_version"] == 1       # nothing was applied
 
 
-def test_a_rewrite_that_changes_a_price_is_refused(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    f = finding(d, "₹399")
-    for bad in ("₹499", "₹399 or less", "₹120"):
-        r = n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="minimal", text=bad)
-        assert r.status_code == 400, bad
+def test_validate_catches_each_kind_of_problem(seeded, app):
+    from brandguard import db as dbm, engine
+    kb = engine.load_kb(dbm.connect(app.config["DB_PATH"]))
+    fx = {"id": 1, "source_type": "guideline", "span_text": "cheap", "suggested_fix": "₹399 priced"}
+    r = {c["id"]: c for c in rw.validate(kb, "A cheap start. Only ₹449.", [], "A ₹399 priced start. Only ₹449.", [fx])}
+    assert not r["numbers"]["ok"] and not r["facts"]["ok"] and not r["clean"]["ok"]
+    big = rw.validate(kb, "A cheap start to a long morning of coffee.", [], "Ok", [{**fx, "suggested_fix": "Ok"}])
+    assert not {c["id"]: c for c in big}["length"]["ok"]
+    empty = {c["id"]: c for c in rw.validate(kb, "x", [], "  ", [])}
+    assert not empty["nonempty"]["ok"]
 
 
-def test_a_rewrite_that_does_not_fix_the_finding_is_refused(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    f = finding(d, "Dude")
-    r = n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="balanced",
-               text="Dude, our new Signature Blend is wonderful!")
-    assert r.status_code == 400 and "does not fix" in r.get_json()["error"]
+def test_overlapping_fixes_apply_once(seeded, login):
+    f = lambda i, s, e, t, fx: {"id": i, "span_start": s, "span_end": e, "span_text": t, "suggested_fix": fx}
+    body, applied, skipped = rw._splice("abcdef", [f(1, 0, 3, "abc", "X"), f(2, 2, 5, "cde", "Y"), f(3, 5, 6, "f", "Z")])
+    assert body == "XdeZ" and [a["id"] for a in applied] == [1, 3] and [k["id"] for k in skipped] == [2]
 
 
-def test_the_wrong_strength_or_missing_text_is_refused(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    f = finding(d, "Dude")
-    assert n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="huge", text="Hello").status_code == 400
-    assert n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="minimal").status_code == 400
-    assert n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="minimal", text="   ").status_code == 400
+def test_applying_creates_a_version_marks_findings_accepted_and_audits(seeded, login, demo, app):
+    s = login(NEHA)
+    cid = make(s, demo)
+    out = s.post(f"/api/content/{cid}/rewrites/minimal/apply").get_json()
+    assert out["new_version"] == 2 and out["applied"] > 0
+    d = s.get(f"/api/content/{cid}").get_json()
+    assert "₹449" in d["body"] and "₹399" not in d["body"]
+    assert {h["decision"] for h in d["history"]} == {"accepted"} and len(d["history"]) == out["applied"]
+    assert any(a["action"] == "rewrite_applied" for a in login(ARJUN).get(f"/api/content/{cid}").get_json()["audit"])
+    left = {f["source_id"] for f in d["findings"] if f["severity"] == "high"}
+    assert left == {"F-02", "G-06"}                                # only what has no safe automatic fix is left for a person
+    assert d["versions"][0]["note"].startswith("Minimal rewrite")
 
 
-def test_restricted_findings_get_no_rewrite_and_cannot_be_applied(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    f = finding(d, "1 December 2026")
-    assert f["restricted"] is True
-    o = opts(n, f)
-    assert o["options"] == [] and "restricted" in o["note"]
-    r = n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength="minimal", text="15 December 2026")
-    assert r.status_code == 403
+def test_permissions_and_validation(seeded, login, demo):
+    neha, arjun = login(NEHA), login(ARJUN)
+    cid = make(neha, demo)
+    assert login(RAHUL).get(f"/api/content/{cid}/rewrites").status_code == 403           # creators see only their own work
+    assert neha.post(f"/api/content/{cid}/rewrites/huge/apply").status_code == 400
+    assert neha.post(f"/api/content/{cid}/rewrites/full/apply").status_code == 200
+    assert neha.post(f"/api/content/{cid}/rewrites/minimal/apply").status_code == 400    # nothing left to apply
+    assert arjun.get(f"/api/content/{cid}/rewrites").status_code == 200                  # a manager can read them
 
 
-def test_only_someone_who_can_decide_may_ask(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    f = finding(d, "Dude")
-    assert login(RAHUL).post(f"/api/findings/{f['id']}/rewrites", use_ai=False).status_code == 403  # not their content
-    assert login(ARJUN).post(f"/api/findings/{f['id']}/rewrites", use_ai=False).status_code == 200
+def test_approved_content_is_locked(seeded, login):
+    neha, meera = login(NEHA), login(MEERA)
+    cid = make_text(neha, "Hello friend. The pouch is ₹449.")
+    assert neha.post(f"/api/content/{cid}/submit").status_code == 200
+    assert meera.post(f"/api/content/{cid}/approve").status_code == 200
+    assert login(MEERA).post(f"/api/content/{cid}/rewrites/full/apply").status_code == 403
 
 
-# ------------------------------------------------------------------ fact preservation, directly
-@pytest.fixture()
-def kb(app, login):
-    login(IRA).post("/api/kb/seed")
+def test_restricted_sources_are_never_used_in_a_rewrite(seeded, login, demo, app):
     from brandguard import db as dbm
-    return engine.load_kb(dbm.connect(app.config["DB_PATH"]))
+    c = dbm.connect(app.config["DB_PATH"])
+    c.execute("UPDATE facts SET access_level='confidential' WHERE code='F-01'")
+    c.commit()
+    s = login(NEHA)                                                                         # internal clearance cannot see F-01
+    cid = make(s, demo)
+    o = opts(s, cid)
+    assert "₹399" in o["full"]["body"] and all(ch["source_id"] != "F-01" for ch in o["full"]["changes"])
 
 
-@pytest.mark.parametrize("before,after,expect", [
-    ("A 250g pouch is ₹449.", "The 250g pouch costs ₹449.", None),
-    ("A 250g pouch is ₹449.", "The 250g pouch costs ₹499.", "introduces"),
-    ("A 250g pouch is ₹449.", "The 250g pouch is a bargain.", "drops the approved"),
-    ("A 250g pouch is ₹449.", "The pouch is ₹449.", "250g"),
-    ("It launches on 15 December 2026.", "It launches on 16 December 2026.", "introduces"),
-    ("It launches on 15 December 2026.", "It launches soon.", "drops the approved"),
-    ("Grab it for ₹399.", "Grab it for ₹449.", None),                 # the approved price replaces a wrong one
-    ("Grab it for ₹399.", "Grab it.", None),                          # dropping a wrong price is fine
-    ("Made from beans.", "Made from 100% beans.", "100%"),
-    ("A Signature Blend pouch.", "A pouch.", "signature blend"),
-    ("Beans from Coorg.", "Beans from Coorg estates.", None),
-])
-def test_facts_must_stay_identical(kb, before, after, expect):
-    problem = rw.facts_problem(kb, before, after)
-    assert (problem is None) if expect is None else (problem and expect in problem), problem
-
-
-def test_tidy_cleans_the_seams_of_a_deletion():
-    assert rw.tidy(", our new blend is here.", True) == "Our new blend is here."
-    assert rw.tidy("A  good , blend .", False) == "A good, blend."
-
-
-# ------------------------------------------------------------------ the AI path
-class FakeAI:
-    def __init__(self, reply):
-        self.reply, self.prompts = reply, []
-
-    def __call__(self, system, user, model):
-        self.prompts.append((system, user))
-        return self.reply(user) if callable(self.reply) else self.reply
-
-
-def ai_app(tmp_path, reply):
-    ai = FakeAI(reply)
-    app = create_app(str(tmp_path / "ai.db"), llm_call=ai)
-    Session(app, IRA).post("/api/kb/seed")
-    return app, ai
-
-
-def test_ai_wording_goes_through_the_same_checks(tmp_path):
-    app, ai = ai_app(tmp_path, "Hello, our new Signature Blend is a joy from the very first sip.")
-    n = Session(app, NEHA)
-    _, d = draft(n, "Dude, our new Signature Blend is insanely good, from the first sip.")
-    o = opts(n, finding(d, "Dude"), ai=True)
-    mine = [x for x in o["options"] if x["source"] == "ai"]
-    assert mine and "(AI wording)" in mine[0]["label"] and mine[0]["after"].startswith("Hello, our new")
-    f = finding(d, "Dude")
-    assert n.post(f"/api/findings/{f['id']}/decide", action="rewrite", strength=mine[0]["strength"], text=mine[0]["after"]).status_code == 200
-
-
-@pytest.mark.parametrize("bad", [
-    "Hey Dude, our new Signature Blend is great.",                    # keeps the violation
-    "Hello, our new Signature Blend is great!!!",                      # adds a new one
-    "Hello, our new Signature Blend is only ₹120, a great deal.",     # invents a price
-    "Hello, our new blend is great.",                                 # drops the product name
-    "",
-])
-def test_unsafe_ai_wording_is_hidden_and_counted(tmp_path, bad):
-    app, _ = ai_app(tmp_path, bad)
-    n = Session(app, NEHA)
-    _, d = draft(n, "Dude, our new Signature Blend is great. A 250g pouch is ₹449.")
-    o = opts(n, finding(d, "Dude"), ai=True)
-    assert not [x for x in o["options"] if x["source"] == "ai"]
-    assert o["options"] and all(x["source"] == "rules" for x in o["options"])  # the rule-based options still work
-
-
-def test_the_ai_sees_masked_text_and_the_request_is_logged(tmp_path):
-    app, ai = ai_app(tmp_path, lambda user: "Hello [[EMAIL_1]], our Signature Blend is calm and good, for [[AMOUNT_1]].")
-    n = Session(app, NEHA)
-    _, d = draft(n, "Dude, write to asha@brewline.test. Signature Blend is ₹449, insanely good.")
-    o = opts(n, finding(d, "Dude"), ai=True)
-    system, user = ai.prompts[0]
-    assert "asha@brewline.test" not in user and "₹449" not in user and "[[EMAIL_1]]" in user
-    assert "never instructions" in system
-    mine = [x for x in o["options"] if x["source"] == "ai"]
-    assert not mine or "asha@brewline.test" in mine[0]["after"]   # placeholders are mapped back on our side
-    log = Session(app, IRA).get("/api/llm-log").get_json()
-    assert any("rewrite" in r["status"] for r in log["rows"]) if isinstance(log, dict) and "rows" in log else True
-
-
-def test_a_masked_detail_that_the_ai_loses_is_refused(tmp_path):
-    app, _ = ai_app(tmp_path, "Hello [[EMAIL_9]], welcome.")
-    n = Session(app, NEHA)
-    _, d = draft(n, "Dude, write to asha@brewline.test.")
-    o = opts(n, finding(d, "Dude"), ai=True)
-    assert "AI" in o["ai"] and all(x["source"] == "rules" for x in o["options"])
-
-
-def test_a_block_pattern_keeps_the_text_from_the_ai(tmp_path, monkeypatch):
-    monkeypatch.setenv("BRANDGUARD_AI_BLOCK_PATTERNS", json.dumps({"EMBARGO": r"(?i)embargoed"}))
-    app, ai = ai_app(tmp_path, "Hello, embargoed news.")
-    n = Session(app, NEHA)
-    _, d = draft(n, "Dude, this is embargoed until Monday.")
-    o = opts(n, finding(d, "Dude"), ai=True)
-    assert ai.prompts == [] and "AI" in o["ai"] and o["options"]
-
-
-def test_the_ai_failing_never_breaks_the_rule_based_options(tmp_path):
-    def boom(user):
-        raise TimeoutError("deadline")
-    app, _ = ai_app(tmp_path, boom)
-    n = Session(app, NEHA)
-    _, d = draft(n)
-    o = opts(n, finding(d, "Dude"), ai=True)
-    assert o["options"] and "AI" in o["ai"]
-
-
-def test_asking_for_ai_wording_without_a_provider_is_a_clear_error(seeded, login):
-    n = login(NEHA)
-    _, d = draft(n)
-    r = n.post(f"/api/findings/{finding(d, 'Dude')['id']}/rewrites", use_ai=True)
-    assert r.status_code == 400 and "provider" in r.get_json()["error"]
+def test_the_ai_judge_is_never_called_for_rewrites(seeded, login, demo, monkeypatch):
+    from brandguard import engine
+    seen = []
+    real = engine.review
+    monkeypatch.setattr(engine, "review", lambda kb, body, images, judge=None, inherited=None: (seen.append(judge), real(kb, body, images, judge=judge, inherited=inherited))[1])
+    s = login(NEHA)
+    cid = make(s, demo)
+    seen.clear()
+    s.get(f"/api/content/{cid}/rewrites")
+    assert seen and set(seen) == {None}

@@ -1,218 +1,222 @@
-"""A measured quality benchmark for the review engine.
+"""Accuracy benchmark for the deterministic checks.
 
-`seed/benchmark.json` holds synthetic drafts where a person has labelled every real mistake. Running the benchmark
-reviews each draft with the current knowledge base and compares what the engine flagged with the labels:
+A benchmark CASE is a short piece of text plus the findings a brand manager says it SHOULD produce.
+A RUN reviews every case with the current knowledge base and scores the result:
 
-  * true positive  - a flagged finding that matches a labelled mistake (same rule or fact, same text)
-  * false positive - a flagged finding with no matching label (a false alarm)
-  * false negative - a labelled mistake the engine did not flag (a miss)
+  true positive   an expected finding that BrandGuard raised
+  false positive  a finding BrandGuard raised that nobody expected (noise for authors)
+  false negative  an expected finding BrandGuard missed (a mistake that would go live)
 
-Precision = TP / (TP + FP): how many alarms were right.  Recall = TP / (TP + FN): how many mistakes were found.
-Both are reported for every rule and fact. The AI judge is measured separately and only when asked, because it
-costs an API call per draft. Nothing here touches real content: the drafts are synthetic.
+  precision = TP / (TP + FP)   "when it flags something, how often is it right?"
+  recall    = TP / (TP + FN)   "of the real problems, how many does it catch?"
+
+Only the rule-based checks run: no AI call is made, so no text leaves the server.
+Every run stores a snapshot of what the checks depend on (glossary, check settings, facts, rule versions),
+so two runs can be compared and the change that moved the numbers can be seen.
 """
-from __future__ import annotations
-
-import datetime as dt
 import json
 import sqlite3
-from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from . import engine
-from .db import now
+from . import versions as rv
+from .errors import NotFound
+from .workflow import now
 
-ROOT = Path(__file__).resolve().parent.parent
-BENCHMARK_FILE = ROOT / "seed" / "benchmark.json"
-LOW_PRECISION = 0.8        # a rule below this (with enough alarms) is flagged for review
-MIN_ALARMS = 3             # fewer alarms than this is too little evidence to judge a rule's precision
-MAX_NOTES = 60
-AI_DRAFTS = 12             # the AI judge is tried on this many drafts: every one with an AI-only mistake, then clean ones
-
-
-def load_cases(path: Path = BENCHMARK_FILE) -> list[dict]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    cases = data["cases"]
-    ids = [c["id"] for c in cases]
-    if len(ids) != len(set(ids)):
-        raise ValueError("Benchmark case ids must be unique")
-    return cases
+MAX_CASES = 200
+MAX_BODY = 20000
+MAX_EXPECTED = 50
+MAX_RUNS = 50
 
 
-def _norm(s: str) -> str:
-    return " ".join((s or "").lower().split())
+def _text(value, what: str, limit: int, required: bool = True) -> str:
+    if not isinstance(value, str):
+        if required:
+            raise ValueError(f"{what} is required")
+        return ""
+    value = value.strip()
+    if required and not value:
+        raise ValueError(f"{what} cannot be empty")
+    if len(value) > limit:
+        raise ValueError(f"{what} is too long (at most {limit} characters)")
+    return value
 
 
-def _same(expected_text: str, found_text: str) -> bool:
-    a, b = _norm(expected_text), _norm(found_text)
-    return bool(a) and bool(b) and (a in b or b in a)
-
-
-def _match(expected: list[dict], found: list) -> tuple[list[tuple[dict, object]], list[dict], list]:
-    """Pair each labelled mistake with at most one finding. Returns (pairs, missed labels, unmatched findings)."""
-    free = list(found)
-    pairs, missed = [], []
+def clean_case(raw, rule_codes: set, fact_codes: set) -> dict:
+    """Validate one labelled case. Raises ValueError with a message a person can act on."""
+    if not isinstance(raw, dict):
+        raise ValueError("Each case must be an object")
+    title = _text(raw.get("title"), "Case title", 200)
+    body = _text(raw.get("body"), "Case text", MAX_BODY)
+    images = raw.get("images", [])
+    if not isinstance(images, list) or len(images) > 20 or not all(isinstance(i, dict) for i in images):
+        raise ValueError("images must be a list of up to 20 objects")
+    expected = raw.get("expected", [])
+    if not isinstance(expected, list) or len(expected) > MAX_EXPECTED:
+        raise ValueError(f"expected must be a list of up to {MAX_EXPECTED} findings (an empty list means the text should be clean)")
+    out = []
     for e in expected:
-        hit = next((f for f in free if f.source_id == e["source_id"] and _same(e["text"], f.span_text)), None)
-        if hit is None:
-            missed.append(e)
-        else:
-            free.remove(hit)
-            pairs.append((e, hit))
-    return pairs, missed, free
+        if not isinstance(e, dict):
+            raise ValueError("Each expected finding must be an object with a source_id")
+        sid = _text(e.get("source_id"), "Expected source_id", 40)
+        if sid not in rule_codes and sid not in fact_codes:
+            raise ValueError(f"Expected finding refers to {sid}, which is not a rule or fact in the knowledge base")
+        text = _text(e.get("text", ""), "Expected text", 300, required=False)
+        out.append({"source_id": sid, "text": text})
+    return {"title": title, "body": body, "images": images, "expected": out}
+
+
+def add_cases(conn, user_id: int, cases) -> int:
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("Provide a list of cases")
+    have = conn.execute("SELECT COUNT(*) FROM benchmark_cases").fetchone()[0]
+    if have + len(cases) > MAX_CASES:
+        raise ValueError(f"A benchmark can hold at most {MAX_CASES} cases ({have} already saved)")
+    rules = {r["code"] for r in conn.execute("SELECT code FROM rules")}
+    facts = {r["code"] for r in conn.execute("SELECT code FROM facts")}
+    cleaned = []
+    for i, raw in enumerate(cases, 1):
+        try:
+            cleaned.append(clean_case(raw, rules, facts))
+        except ValueError as exc:
+            raise ValueError(f"Case {i}: {exc}") from None
+    for c in cleaned:
+        conn.execute("INSERT INTO benchmark_cases(title, body, images, expected, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                     (c["title"], c["body"], json.dumps(c["images"]), json.dumps(c["expected"]), user_id, now()))
+    conn.commit()
+    return len(cleaned)
+
+
+def delete_case(conn, case_id: int) -> None:
+    if not conn.execute("DELETE FROM benchmark_cases WHERE id=?", (case_id,)).rowcount:
+        raise NotFound("No such case")
+    conn.commit()
+
+
+def list_cases(conn) -> list[dict]:
+    return [{"id": r["id"], "title": r["title"], "body": r["body"], "images": json.loads(r["images"]),
+             "expected": json.loads(r["expected"])} for r in conn.execute("SELECT * FROM benchmark_cases ORDER BY id")]
 
 
 def _ratio(num: int, den: int) -> Optional[float]:
-    return round(num / den, 3) if den else None
+    return round(num / den, 4) if den else None
 
 
-def _ai_subset(cases: list[dict]) -> set[str]:
-    chosen = [c["id"] for c in cases if any(e.get("ai") for e in c["expected"])]
-    chosen += [c["id"] for c in cases if not c["expected"]]
-    return set(chosen[:AI_DRAFTS])
+def score_case(predicted: list, expected: list[dict]) -> dict:
+    """Match raised findings to expected ones, one to one. An expected finding with no text matches any
+    finding from that source; with text, the flagged text must contain it (ignoring case), because the
+    checks often flag a little more than the key word, for example "a cheap" for "cheap"."""
+    pool = [(f.source_id, (f.span_text or "").strip().lower(), f) for f in predicted]
+    used: set[int] = set()
+    missed, matched = [], []
+    tp = 0
+    for e in expected:
+        want = e.get("text", "").strip().lower()
+        hit = next((i for i, (sid, txt, _) in enumerate(pool) if i not in used and sid == e["source_id"] and (not want or want in txt)), None)
+        if hit is None:
+            missed.append({"source_id": e["source_id"], "text": e.get("text", "")})
+        else:
+            used.add(hit)
+            matched.append(e["source_id"])
+            tp += 1
+    extra = [{"source_id": sid, "text": f.span_text, "issue": f.issue} for i, (sid, _, f) in enumerate(pool) if i not in used]
+    return {"tp": tp, "fp": len(extra), "fn": len(missed), "missed": missed, "extra": extra, "matched": matched}
 
 
-def run(conn: sqlite3.Connection, judge: Optional[Callable] = None, cases: Optional[list[dict]] = None) -> dict:
-    """Review every labelled draft and score the result. `judge` adds the AI judge (rule results stay separate);
-    it is tried on a subset of the drafts (AI_DRAFTS), because every draft costs one API call."""
-    cases = load_cases() if cases is None else cases
-    ai_ids = _ai_subset(cases) if judge else set()
+def snapshot(conn) -> dict:
+    """Everything the deterministic checks depend on, so two runs can be compared."""
+    codes = [r["code"] for r in conn.execute("SELECT code FROM rules ORDER BY code")]
+    for code in codes:
+        rv.sync(conn, code)
+    conn.commit()
+    pub = {r["rule_code"]: r["version"] for r in conn.execute("SELECT rule_code, version FROM rule_versions WHERE status='published'")}
     kb = engine.load_kb(conn)
-    per: dict[str, dict] = {}
-    ai = {"tp": 0, "fp": 0, "fn": 0, "drafts": 0}
-    notes: list[dict] = []
-
-    def row(code: str) -> dict:
-        return per.setdefault(code, {"code": code, "tp": 0, "fp": 0, "fn": 0})
-
-    for case in cases:
-        result = engine.review(kb, case["body"], [dict(i) for i in case.get("images", [])],
-                               judge=judge if case["id"] in ai_ids else None)
-        rule_found = [f for f in result.findings if not f.ai_generated]
-        ai_found = [f for f in result.findings if f.ai_generated]
-        rule_labels = [e for e in case["expected"] if not e.get("ai")]
-        ai_labels = [e for e in case["expected"] if e.get("ai")]
-
-        pairs, missed, spare = _match(rule_labels, rule_found)
-        for e, _ in pairs:
-            row(e["source_id"])["tp"] += 1
-        for e in missed:
-            row(e["source_id"])["fn"] += 1
-            notes.append({"case": case["id"], "title": case["title"], "kind": "missed", "code": e["source_id"], "text": e["text"]})
-        for f in spare:
-            row(f.source_id)["fp"] += 1
-            notes.append({"case": case["id"], "title": case["title"], "kind": "false_alarm", "code": f.source_id, "text": f.span_text})
-
-        if judge and case["id"] in ai_ids:
-            ai["drafts"] += 1
-            # the AI is judged on every finding it adds, against all labels the rules did not already settle
-            leftover = ai_labels + missed
-            a_pairs, a_missed, a_spare = _match(leftover, ai_found)
-            ai["tp"] += len(a_pairs)
-            ai["fn"] += len([e for e in a_missed if e.get("ai")])
-            ai["fp"] += len(a_spare)
-
-    rules = []
-    titles = {c: r["title"] for c, r in kb.rules.items()}
-    titles.update({f["code"]: f["statement"] for f in kb.facts})
-    for code in sorted(per):
-        r = per[code]
-        rules.append({**r, "title": titles.get(code, code), "precision": _ratio(r["tp"], r["tp"] + r["fp"]),
-                      "recall": _ratio(r["tp"], r["tp"] + r["fn"]),
-                      "review": r["tp"] + r["fp"] >= MIN_ALARMS and r["tp"] / (r["tp"] + r["fp"]) < LOW_PRECISION})
-    tp, fp, fn = (sum(r[k] for r in rules) for k in ("tp", "fp", "fn"))
-    out = {
-        "drafts": len(cases), "labels": sum(len(c["expected"]) for c in cases),
-        "overall": {"tp": tp, "fp": fp, "fn": fn, "precision": _ratio(tp, tp + fp), "recall": _ratio(tp, tp + fn)},
-        "rules": rules, "notes": notes[:MAX_NOTES], "notes_total": len(notes), "ai": None,
-    }
-    if judge:
-        out["ai"] = {**ai, "precision": _ratio(ai["tp"], ai["tp"] + ai["fp"]), "recall": _ratio(ai["tp"], ai["tp"] + ai["fn"])}
-    return out
+    return {"rules": {c: pub.get(c) for c in codes},
+            "glossary": sorted(f"{g['term']} -> {g['preferred']} ({g['kind']}, {g['rule_code']})" for g in kb.glossary),
+            "facts": sorted(f"{f['code']}: {json.dumps(f['data'], sort_keys=True)}" for f in kb.facts),
+            "checks": kb.checks}
 
 
-def save(conn: sqlite3.Connection, user_id: Optional[int], result: dict, label: str = "") -> int:
-    cur = conn.execute("INSERT INTO benchmark_runs(created_at, user_id, label, with_ai, result) VALUES (?,?,?,?,?)",
-                       (now(), user_id, label[:200], 1 if result.get("ai") else 0, json.dumps(result)))
+def run(conn, user_id: int, label: str = "") -> dict:
+    label = _text(label, "Label", 120, required=False)
+    cases = list_cases(conn)
+    if not cases:
+        raise ValueError("There are no benchmark cases yet. Add cases or load the demo set first.")
+    kb = engine.load_kb(conn)
+    snap = snapshot(conn)
+    per_case, per_rule = [], {}
+    tp = fp = fn = 0
+    for c in cases:
+        result = engine.review(kb, c["body"], c["images"], judge=None)
+        s = score_case(result.findings, c["expected"])
+        per_case.append({"case_id": c["id"], "title": c["title"], **{k: v for k, v in s.items() if k != "matched"}})
+        tp, fp, fn = tp + s["tp"], fp + s["fp"], fn + s["fn"]
+        for e in c["expected"]:
+            per_rule.setdefault(e["source_id"], {"tp": 0, "fp": 0, "fn": 0})
+        # per-rule counts: matched and missed come from the case; extras are attributed to their source
+        for m in s["missed"]:
+            per_rule.setdefault(m["source_id"], {"tp": 0, "fp": 0, "fn": 0})["fn"] += 1
+        for x in s["extra"]:
+            per_rule.setdefault(x["source_id"], {"tp": 0, "fp": 0, "fn": 0})["fp"] += 1
+        for sid in s["matched"]:
+            per_rule[sid]["tp"] += 1
+    rules = {k: {**v, "precision": _ratio(v["tp"], v["tp"] + v["fp"]), "recall": _ratio(v["tp"], v["tp"] + v["fn"])} for k, v in sorted(per_rule.items())}
+    summary = {"cases": len(cases), "tp": tp, "fp": fp, "fn": fn,
+               "precision": _ratio(tp, tp + fp), "recall": _ratio(tp, tp + fn)}
+    cur = conn.execute("INSERT INTO benchmark_runs(label, created_by, created_at, summary, per_rule, per_case, snapshot) VALUES (?,?,?,?,?,?,?)",
+                       (label, user_id, now(), json.dumps(summary), json.dumps(rules), json.dumps(per_case), json.dumps(snap)))
+    conn.execute("DELETE FROM benchmark_runs WHERE id NOT IN (SELECT id FROM benchmark_runs ORDER BY id DESC LIMIT ?)", (MAX_RUNS,))
     conn.commit()
-    return cur.lastrowid
+    return get_run(conn, cur.lastrowid)
 
 
-PENDING = '{"pending": true}'
-PENDING_MINUTES = 10
+def _run_row(r) -> dict:
+    return {"id": r["id"], "label": r["label"], "created_at": r["created_at"], "author": r["author"], "summary": json.loads(r["summary"])}
 
 
-def start_pending(conn: sqlite3.Connection, user_id: Optional[int], label: str) -> int:
-    """A run with the AI judge takes a while, so it is recorded first and filled in when it finishes."""
-    cur = conn.execute("INSERT INTO benchmark_runs(created_at, user_id, label, with_ai, result) VALUES (?,?,?,1,?)",
-                       (now(), user_id, label[:200], PENDING))
-    conn.commit()
-    return cur.lastrowid
+_RUN_SQL = "SELECT b.*, u.name AS author FROM benchmark_runs b LEFT JOIN users u ON u.id=b.created_by"
 
 
-def finish_pending(conn: sqlite3.Connection, run_id: int, result: Optional[dict], failed: str = "") -> None:
-    value = json.dumps(result) if result else json.dumps({"failed": failed[:300] or "the run did not finish"})
-    conn.execute("UPDATE benchmark_runs SET result=? WHERE id=?", (value, run_id))
-    conn.commit()
+def list_runs(conn) -> list[dict]:
+    return [_run_row(r) for r in conn.execute(_RUN_SQL + " ORDER BY b.id DESC")]
 
 
-def pending(conn: sqlite3.Connection) -> Optional[dict]:
-    """The AI run in progress, if any (a run that never reported back stops counting after a few minutes)."""
-    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=PENDING_MINUTES)).isoformat(timespec="seconds")
-    row = conn.execute("SELECT id, created_at FROM benchmark_runs WHERE result=? AND created_at>=? ORDER BY id DESC LIMIT 1",
-                       (PENDING, cutoff)).fetchone()
-    return dict(row) if row else None
+def get_run(conn, run_id: int) -> dict:
+    r = conn.execute(_RUN_SQL + " WHERE b.id=?", (run_id,)).fetchone()
+    if not r:
+        raise NotFound("No such benchmark run")
+    return {**_run_row(r), "per_rule": json.loads(r["per_rule"]), "per_case": json.loads(r["per_case"]), "snapshot": json.loads(r["snapshot"])}
 
 
-def last_failure(conn: sqlite3.Connection) -> str:
-    row = conn.execute("SELECT result FROM benchmark_runs ORDER BY id DESC LIMIT 1").fetchone()
-    if row:
-        res = json.loads(row["result"])
-        return res.get("failed", "") if isinstance(res, dict) else ""
-    return ""
+def _list_diff(a: list, b: list) -> dict:
+    return {"added": [x for x in b if x not in a], "removed": [x for x in a if x not in b]}
 
 
-def _finished() -> str:
-    return "result NOT LIKE '{\"pending\"%' AND result NOT LIKE '{\"failed\"%'"
+def what_changed(before: dict, after: dict) -> dict:
+    """Plain-language differences between the two knowledge-base snapshots."""
+    rules = [{"code": c, "from": before["rules"].get(c), "to": v} for c, v in after["rules"].items() if before["rules"].get(c) != v]
+    checks = [{"check": k, "from": before["checks"].get(k), "to": after["checks"].get(k)}
+              for k in sorted(set(before["checks"]) | set(after["checks"])) if before["checks"].get(k) != after["checks"].get(k)]
+    return {"glossary": _list_diff(before["glossary"], after["glossary"]), "facts": _list_diff(before["facts"], after["facts"]),
+            "checks": checks, "rule_versions": rules}
 
 
-def get(conn: sqlite3.Connection, run_id: int) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM benchmark_runs WHERE id=?", (run_id,)).fetchone()
-    if not row:
-        return None
-    return {"id": row["id"], "created_at": row["created_at"], "label": row["label"], "result": json.loads(row["result"])}
+def compare(conn, before_id: int, after_id: int) -> dict:
+    a, b = get_run(conn, before_id), get_run(conn, after_id)
+    rules = {}
+    for code in sorted(set(a["per_rule"]) | set(b["per_rule"])):
+        rules[code] = {"before": a["per_rule"].get(code), "after": b["per_rule"].get(code)}
+    cases_before = {c["case_id"]: c for c in a["per_case"]}
+    changed = []
+    for c in b["per_case"]:
+        old = cases_before.get(c["case_id"])
+        if old and (old["fp"], old["fn"]) != (c["fp"], c["fn"]):
+            changed.append({"case_id": c["case_id"], "title": c["title"], "before": {"fp": old["fp"], "fn": old["fn"]}, "after": {"fp": c["fp"], "fn": c["fn"]}})
+    sa, sb = a["summary"], b["summary"]
+    delta = {k: (None if sa[k] is None or sb[k] is None else round(sb[k] - sa[k], 4)) for k in ("precision", "recall")}
+    return {"before": _run_row_from(a), "after": _run_row_from(b), "summary": {"before": sa, "after": sb, "delta": delta},
+            "rules": rules, "cases_changed": changed, "changes": what_changed(a["snapshot"], b["snapshot"])}
 
 
-def history(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    out = []
-    for r in conn.execute(f"SELECT * FROM benchmark_runs WHERE {_finished()} ORDER BY id DESC LIMIT ?", (limit,)):
-        res = json.loads(r["result"])
-        out.append({"id": r["id"], "created_at": r["created_at"], "label": r["label"], "with_ai": bool(r["with_ai"]),
-                    "precision": res["overall"]["precision"], "recall": res["overall"]["recall"]})
-    return out
-
-
-def latest(conn: sqlite3.Connection) -> Optional[dict]:
-    row = conn.execute(f"SELECT id FROM benchmark_runs WHERE {_finished()} ORDER BY id DESC LIMIT 1").fetchone()
-    return get(conn, row["id"]) if row else None
-
-
-def compare(before: dict, after: dict) -> dict:
-    """Per-rule and overall change between two stored results (after minus before)."""
-    def delta(a, b):
-        return None if a is None or b is None else round(b - a, 3)
-    old = {r["code"]: r for r in before["rules"]}
-    new = {r["code"]: r for r in after["rules"]}
-    rules = []
-    for code in sorted(set(old) | set(new)):
-        o, n = old.get(code, {}), new.get(code, {})
-        rules.append({"code": code, "precision_before": o.get("precision"), "precision_after": n.get("precision"),
-                      "recall_before": o.get("recall"), "recall_after": n.get("recall"),
-                      "precision_change": delta(o.get("precision"), n.get("precision")),
-                      "recall_change": delta(o.get("recall"), n.get("recall"))})
-    b, a = before["overall"], after["overall"]
-    return {"precision_before": b["precision"], "precision_after": a["precision"],
-            "recall_before": b["recall"], "recall_after": a["recall"],
-            "precision_change": delta(b["precision"], a["precision"]),
-            "recall_change": delta(b["recall"], a["recall"]),
-            "changed_rules": [r for r in rules if r["precision_change"] or r["recall_change"]]}
+def _run_row_from(run: dict) -> dict:
+    return {k: run[k] for k in ("id", "label", "created_at", "author", "summary")}

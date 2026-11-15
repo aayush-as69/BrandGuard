@@ -6,4 +6,3 @@ requests>=2.31
 gunicorn>=22.0
 Pillow>=10.3
 cryptography>=42
-numpy>=1.26

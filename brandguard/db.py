@@ -207,31 +207,42 @@ def _m6_login_failures(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_login_failures_key ON login_failures(key, at)")
 
 
-def _m7_quality(conn: sqlite3.Connection) -> None:
-    """Round 3: benchmark runs, versioned knowledge-base changes, and measurements read from uploaded images."""
+def _m7_rule_versions(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE rule_versions(
+      id INTEGER PRIMARY KEY,
+      rule_code TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('draft','published','archived')),
+      note TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      published_at TEXT,
+      UNIQUE(rule_code, version))""")
+    # at most one draft and exactly one published version per rule
+    conn.execute("CREATE UNIQUE INDEX idx_rule_versions_draft ON rule_versions(rule_code) WHERE status='draft'")
+    conn.execute("CREATE UNIQUE INDEX idx_rule_versions_published ON rule_versions(rule_code) WHERE status='published'")
+
+
+def _m8_benchmark(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE benchmark_cases(
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      images TEXT NOT NULL DEFAULT '[]',
+      expected TEXT NOT NULL DEFAULT '[]',
+      created_by INTEGER,
+      created_at TEXT NOT NULL)""")
     conn.execute("""CREATE TABLE benchmark_runs(
-        id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_id INTEGER, label TEXT NOT NULL DEFAULT '',
-        with_ai INTEGER NOT NULL DEFAULT 0, result TEXT NOT NULL)""")
-    conn.execute("""CREATE TABLE kb_changes(
-        id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_id INTEGER, kind TEXT NOT NULL, target TEXT NOT NULL,
-        summary TEXT NOT NULL, before TEXT NOT NULL, after TEXT NOT NULL, suggestion TEXT NOT NULL DEFAULT '',
-        run_before INTEGER, run_after INTEGER, reverted_at TEXT, reverted_by INTEGER)""")
-    conn.execute("""CREATE TABLE image_checks(
-        id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, sha256 TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL, measure TEXT NOT NULL)""")
-    conn.execute("CREATE INDEX idx_image_checks_user ON image_checks(user_id, id)")
-
-
-def _m8_ai_observability(conn: sqlite3.Connection) -> None:
-    """Add provider/request timing and verification counters to the AI audit log."""
-    for col in (
-        "request_id TEXT NOT NULL DEFAULT ''",
-        "provider TEXT NOT NULL DEFAULT ''",
-        "latency_ms REAL NOT NULL DEFAULT 0",
-        "accepted INTEGER NOT NULL DEFAULT 0",
-        "discarded INTEGER NOT NULL DEFAULT 0",
-    ):
-        conn.execute(f"ALTER TABLE llm_log ADD COLUMN {col}")
+      id INTEGER PRIMARY KEY,
+      label TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      per_rule TEXT NOT NULL,
+      per_case TEXT NOT NULL,
+      snapshot TEXT NOT NULL)""")
 
 
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
@@ -240,8 +251,8 @@ MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (4, "individual accounts: email, password hash, active flag, session epoch", _m4_accounts),
     (5, "two-step sign-in (TOTP) columns", _m5_mfa),
     (6, "shared failed-sign-in counts for the throttle", _m6_login_failures),
-    (7, "benchmark runs, versioned knowledge-base changes, measured image checks", _m7_quality),
-    (8, "AI request observability metadata and verification counters", _m8_ai_observability),
+    (7, "guideline rule version history", _m7_rule_versions),
+    (8, "accuracy benchmark cases and runs", _m8_benchmark),
 ]
 
 
