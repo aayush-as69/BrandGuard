@@ -4,6 +4,6 @@ python-docx>=1.1
 pypdf>=4.0
 requests>=2.31
 gunicorn>=22.0
-Pillow>=10.3
+Pillow>=13.0.0
 cryptography>=42
 numpy>=1.26
