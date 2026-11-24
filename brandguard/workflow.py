@@ -240,12 +240,14 @@ def _store_review(conn, content_id: int, ver: int, result, dismissals: _Dismissa
     return carried
 
 
-def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, ai: str = "fresh") -> dict:
+def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, ai: str = "fresh",
+               user_id: Optional[int] = None) -> dict:
     """(Re)review the current version. Dismissals made earlier on the same issue carry over.
 
     ai="fresh": ask the AI judge (it sees the content).  ai="inherit": do NOT contact the AI;
     suggestions it made on the previous version are re-located in the new text and kept.
-    ai="off": the author chose not to send the text to the AI service; rules only."""
+    ai="off": the author chose not to send the text to the AI service; rules only.
+    user_id: who caused the review, for the audit trail (None for a system-started one)."""
     c = dict(conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone())
     v = current(conn, c)
     ver = c["current_version"]
@@ -274,7 +276,7 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
         meta["pending_since"] = now()
     conn.execute("UPDATE versions SET review_meta=? WHERE content_id=? AND version=?",
                  (json.dumps(meta), content_id, ver))
-    audit(conn, content_id, None, "review_run",
+    audit(conn, content_id, user_id, "review_run",
           f"v{ver}: {len(result.findings)} findings, {carried} carried over; AI judge: {result.llm_status}")
     conn.commit()
     if schedule:
@@ -283,11 +285,13 @@ def run_review(conn, content_id: int, judge_factory: Optional[Callable] = None, 
 
 
 PENDING = "pending: the AI tone check is still running; the rule-based findings below are complete"
+APPROVED_BEFORE_AI = "skipped: the content was approved before the AI tone check finished, so no AI suggestions were added"
 
 
 def complete_ai_review(conn, content_id: int, ver: int, judge_factory: Callable) -> None:
     """Background half of a review: ask the AI judge and add what survives verification to this version.
-    Does nothing if the content has moved on to a newer version in the meantime."""
+    Does nothing if the content has moved on to a newer version in the meantime, and adds no findings once the
+    content has been approved (approved content is locked)."""
     def finish(status: str, rejected=(), added=0) -> None:
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -312,6 +316,8 @@ def complete_ai_review(conn, content_id: int, ver: int, judge_factory: Callable)
     v = version_row(conn, content_id, ver)
     body, images = v["body"], json.loads(v["images"])
     try:
+        if c["status"] == "approved":  # approved while the check was pending: do not spend the AI call, just settle
+            return finish(APPROVED_BEFORE_AI)
         judge = judge_factory(conn, content_id, ver)
         if judge is None:
             return finish("not used")
@@ -322,16 +328,25 @@ def complete_ai_review(conn, content_id: int, ver: int, judge_factory: Callable)
         dismissals = _Dismissals(conn, content_id)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            if conn.execute("SELECT current_version FROM content WHERE id=?", (content_id,)).fetchone()[0] != ver:
+            cur_version, cur_status = conn.execute(
+                "SELECT current_version, status FROM content WHERE id=?", (content_id,)).fetchone()
+            if cur_version != ver:
                 conn.execute("ROLLBACK")
                 return
-            for f in accepted:
-                _insert_finding(conn, content_id, ver, f, dismissals)
-            conn.execute("COMMIT")
+            locked = cur_status == "approved"  # approved while the AI was thinking: the locked content gets no new findings
+            if locked:
+                conn.execute("ROLLBACK")
+            else:
+                for f in accepted:
+                    _insert_finding(conn, content_id, ver, f, dismissals)
+                conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
-        finish(status, rejected, len(accepted))
+        if locked:
+            finish(APPROVED_BEFORE_AI, rejected)
+        else:
+            finish(status, rejected, len(accepted))
     except Exception as exc:  # never leave a review "pending" forever
         finish(f"failed: {type(exc).__name__}: {exc}"[:200])
 
@@ -339,7 +354,7 @@ def complete_ai_review(conn, content_id: int, ver: int, judge_factory: Callable)
 def settle_interrupted_reviews(conn) -> int:
     """At start-up: an AI check that was running when the server stopped will never finish; say so."""
     n = 0
-    for r in conn.execute("SELECT content_id, version, review_meta FROM versions WHERE review_meta LIKE '%pending%'").fetchall():
+    for r in conn.execute("SELECT content_id, version, review_meta FROM versions WHERE review_meta LIKE '%\"llm_status\": \"pending%'").fetchall():
         meta = json.loads(r["review_meta"] or "{}")
         started = meta.get("pending_since") or ""
         stale = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=120)).isoformat(timespec="seconds")
@@ -366,7 +381,7 @@ def create_content(conn, user: dict, title: str, body: str, images: list[dict],
         (cid, 1, body, json.dumps(images), user["id"], "Created", now()))
     audit(conn, cid, user["id"], "content_created", title)
     conn.commit()
-    run_review(conn, cid, judge_factory, ai)
+    run_review(conn, cid, judge_factory, ai, user["id"])
     return cid
 
 
@@ -436,7 +451,7 @@ def _new_version(conn, c: dict, user_id: int, body: str, images: list[dict], not
     audit(conn, c["id"], user_id, "version_created", f"v{ver}: {note}")
     conn.commit()
     c["current_version"] = ver
-    run_review(conn, c["id"], judge_factory, ai)
+    run_review(conn, c["id"], judge_factory, ai, user_id)
     return ver
 
 

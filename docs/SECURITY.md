@@ -12,6 +12,8 @@
 Sessions are signed, HttpOnly, SameSite=Lax cookies (Secure in production) valid for 8 hours and tied to a per-user epoch,
 so deactivating a user, changing their role or password ends their sessions immediately. The last active admin cannot be removed.
 
+**Demo mode is for demos only.** `BRANDGUARD_SEED_DEMO=1` together with `BRANDGUARD_DEMO_PASSWORD` publishes that password to every unauthenticated visitor (`/api/config` hands it to the landing page's **Try demo** button). Never set either on a deployment that holds real content. Local demo auth (`BRANDGUARD_AUTH=demo`, the default outside production) also lists every user at `/api/users` without signing in and signs anyone in with only the optional passcode (production refuses demo auth unless a passcode is set). Use real accounts for anything beyond a demo.
+
 **Two-step sign-in.** Optional TOTP (secrets encrypted at rest) (RFC 6238, any authenticator app), checked on every password sign-in once enabled. A used code cannot be reused,
 wrong codes count toward the same throttle, an admin can reset a lost device. **Single sign-on** works through an identity-aware proxy (see DEPLOYMENT.md).
 
@@ -29,7 +31,7 @@ refused before parsing if its parts would unzip to over 50 MB or more than 100 t
 
 **Errors.** Database errors are logged on the server and never shown; the client gets a short safe message (for example "That email address is already in use").
 
-**Throttle.** Failed sign-ins are counted (10 per client address, 40 per target email, so one attacker cannot lock a colleague out) in the shared database, so several workers enforce one limit; if the store fails, sign-in is refused.
+**Throttle.** Failed sign-ins (and failed single sign-on attempts, counted separately) are counted (10 per client address, 40 per target email, so one attacker cannot lock a colleague out) in the shared database, so several workers enforce one limit; if the store fails, sign-in is refused. Requests that send text to the AI provider (creating or revising content, re-running a review, AI rewrites, the AI benchmark) are capped per signed-in user, 30 per 5 minutes by default (`BRANDGUARD_AI_RATE_LIMIT`, `0` turns the cap off), so one account cannot burn through the provider budget.
 
 **AI.** Output is verified: a finding must quote a real rule and real text from the content or it is dropped. AI findings are labelled,
 capped at medium confidence, never auto-applied. See PRIVACY.md.

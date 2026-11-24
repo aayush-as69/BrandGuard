@@ -15,6 +15,7 @@ WINDOW = 300.0   # seconds a failure counts for
 LIMIT = 10       # failures allowed per client address inside the window
 EMAIL_LIMIT = 40 # per target email: high enough that one attacker cannot lock a colleague out from a single address,
                  # low enough to bound a distributed guessing run (about 11,000 guesses a day per account)
+AI_LIMIT = 30    # paid AI requests allowed per signed-in user inside WINDOW (BRANDGUARD_AI_RATE_LIMIT overrides)
 log = logging.getLogger("brandguard.throttle")
 
 
@@ -41,3 +42,24 @@ def record(conn: sqlite3.Connection, *keys: str, now: float | None = None) -> No
         conn.commit()
     except sqlite3.Error:
         log.exception("could not record a failed sign-in")
+
+
+def spend(conn: sqlite3.Connection, key: str, limit: int, now: float | None = None) -> None:
+    """Count one use of a costly action against `key` and raise RateLimited once it has been used `limit` times
+    inside the window (limit <= 0 means no cap). A refused attempt is not counted, so waiting always helps.
+    Shares the table and the WINDOW with the sign-in counters; fails closed if the store cannot be used."""
+    if limit <= 0:
+        return
+    now = time.time() if now is None else now
+    try:
+        conn.execute("DELETE FROM login_failures WHERE at < ?", (now - WINDOW,))
+        row_id = conn.execute("INSERT INTO login_failures(key, at) VALUES (?,?)", (key, now)).lastrowid
+        n = conn.execute("SELECT COUNT(*) FROM login_failures WHERE key=?", (key,)).fetchone()[0]
+        if n > limit:
+            conn.execute("DELETE FROM login_failures WHERE rowid=?", (row_id,))
+        conn.commit()
+    except sqlite3.Error:
+        log.exception("AI request throttle store unavailable; refusing the request")
+        raise RateLimited("AI requests are temporarily unavailable. Try again shortly.")
+    if n > limit:
+        raise RateLimited("Too many AI requests in a short time. Wait a few minutes, or switch AI review off for now.")

@@ -222,8 +222,11 @@ def purge_log(conn: sqlite3.Connection) -> int:
     """Delete AI log rows older than the retention period (0 days keeps nothing). Returns rows deleted."""
     days = retention_days()
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat(timespec="seconds")
-    n = conn.execute("DELETE FROM llm_log WHERE created_at <= ?" if days == 0 else
-                     "DELETE FROM llm_log WHERE created_at < ?", (cutoff,)).rowcount
+    op = "<=" if days == 0 else "<"
+    # It runs before every AI call, so look first and only write (and commit) when there is something to delete.
+    if not conn.execute(f"SELECT 1 FROM llm_log WHERE created_at {op} ? LIMIT 1", (cutoff,)).fetchone():
+        return 0
+    n = conn.execute(f"DELETE FROM llm_log WHERE created_at {op} ?", (cutoff,)).rowcount
     conn.commit()
     return n
 
@@ -373,7 +376,7 @@ def make_rewriter(conn: sqlite3.Connection, content_id: Optional[int] = None, ve
                 text = text[1:-1].strip()
             text = unredact(text, mapping)
             if "[[" in text:
-                raise ValueError("the rewrite lost a masked detail")
+                raise ValueError("the rewrite lost a masked detail (a [[PLACEHOLDER]] was changed or dropped, so it could not be restored)")
         except Exception as exc:
             outcome(f"failed (rewrite): {type(exc).__name__}: {exc}")
             raise

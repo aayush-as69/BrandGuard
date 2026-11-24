@@ -185,6 +185,7 @@ The included demo uses **Brewline Coffee**, a fictional brand. All seeded conten
 | `BRANDGUARD_SEED_DEMO=1` | Load the Brewline demo knowledge base into an empty workspace on start |
 | `BRANDGUARD_DEMO_PASSWORD` | With seeding on, creates the four synthetic demo accounts and one sample draft. The landing-page **Try demo** button uses this configured credential pair. Demo sites only |
 | `BRANDGUARD_LLM_API_KEY` | Key for the optional AI check (see the next section) |
+| `BRANDGUARD_AI_RATE_LIMIT` | Most AI-provider requests one signed-in user can trigger in 5 minutes (default 30; `0` = no cap) |
 
 **Signing in.** Visitors see a landing page; **Sign in** opens `/login`. Use the admin email and password above, or a demo account when seeding is on. After a wipe on the free tier, the admin account and (if enabled) the demo data are recreated on the next start.
 

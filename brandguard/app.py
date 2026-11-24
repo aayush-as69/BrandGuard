@@ -1,6 +1,7 @@
 """Flask app: JSON API plus the single-page review UI."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -49,6 +50,55 @@ def payload() -> dict:
     if not isinstance(data, dict):
         raise ValueError("Request body must be a JSON object")
     return data
+
+
+def _like_pattern(q: str) -> str:
+    """A LIKE pattern that matches q literally: a search for "%" or "_" must not match everything.
+    Use with ESCAPE '\\' in the query."""
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _snippet(text, q: str, width: int = 240) -> str:
+    """A short excerpt of text around the first match of q (the start of the text if q is not in it)."""
+    text = str(text or "")
+    if len(text) <= width:
+        return text
+    at = max(text.lower().find(q.lower()), 0)
+    start = max(0, at - width // 3)
+    end = min(len(text), start + width)
+    start = max(0, end - width)
+    return ("\u2026" if start else "") + text[start:end] + ("\u2026" if end < len(text) else "")
+
+
+@contextlib.contextmanager
+def _seed_lock(path: str):
+    """An exclusive lock on a file, so several workers do not seed the demo workspace at once.
+    fcntl on Unix; msvcrt on Windows (fcntl does not exist there)."""
+    with open(path, "w") as lock:
+        try:
+            import fcntl
+        except ImportError:
+            import msvcrt
+            lock.write(" ")
+            lock.flush()
+            while True:
+                lock.seek(0)
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)  # waits ~10 s, then raises: keep waiting
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _persistent_secret(db_path: str) -> str:
@@ -113,9 +163,7 @@ def _seed_demo_workspace(conn: sqlite3.Connection, db_file: str) -> None:
     """BRANDGUARD_SEED_DEMO=1: on an empty workspace, load the synthetic Brewline knowledge base, and, if
     BRANDGUARD_DEMO_PASSWORD is set (10+ characters), add the demo accounts and one sample draft. Safe to run
     from several workers at once (file lock) and on every start (only fills what is empty). For demo sites only."""
-    import fcntl
-    with open(db_file + ".seed.lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _seed_lock(db_file + ".seed.lock"):
         if not conn.execute("SELECT 1 FROM guidelines LIMIT 1").fetchone():
             kbm.seed_demo(conn, ROOT / "seed")
         password = os.environ.get("BRANDGUARD_DEMO_PASSWORD", "")
@@ -152,6 +200,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             "Use BRANDGUARD_AUTH=accounts for a real deployment.")
     accounts = auth_mode == "accounts"
     proxies = int(os.environ.get("BRANDGUARD_TRUSTED_PROXIES", "0") or 0)
+    try:
+        ai_rate_limit = int(os.environ.get("BRANDGUARD_AI_RATE_LIMIT", throttle.AI_LIMIT))
+    except ValueError:
+        ai_rate_limit = throttle.AI_LIMIT
     sso_header = os.environ.get("BRANDGUARD_SSO_EMAIL_HEADER", "")
     sso_secret = os.environ.get("BRANDGUARD_SSO_SECRET", "") if accounts and sso_header else ""
     if sso_header and accounts and len(sso_secret) < 16:
@@ -210,6 +262,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if not isinstance(flag, bool):
             raise ValueError("use_ai must be true or false")
         return "fresh" if flag else "off"
+
+    def spend_ai_budget(user: dict, mode: str = "fresh") -> None:
+        """Cap how fast one signed-in user can trigger paid AI calls (BRANDGUARD_AI_RATE_LIMIT per 5 minutes,
+        0 = no cap). Requests that do not reach the provider cost nothing."""
+        if mode == "fresh" and llm.ai_available(app.config["LLM_CALL"]):
+            throttle.spend(conn(), f"ai:{user['id']}", ai_rate_limit)
 
     def judge_factory(c, content_id, version):
         return llm.make_judge(c, content_id, version, call=app.config["LLM_CALL"])
@@ -484,9 +542,12 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise NotFound("Single sign-on is not configured")
         given = request.headers.get("X-SSO-Secret", "")
         email = request.headers.get(sso_header, "").strip().lower()
-        if not hmac.compare_digest(given.encode(), sso_secret.encode()) or not email:
-            raise AuthError("Single sign-on failed")
         c = conn()
+        who = "sso:" + (request.remote_addr or "?")  # its own counter: the shared secret is the only gate here
+        throttle.check(c, who)
+        if not hmac.compare_digest(given.encode(), sso_secret.encode()) or not email:
+            throttle.record(c, who)
+            raise AuthError("Single sign-on failed")
         row = c.execute("SELECT * FROM users WHERE lower(email)=? AND active=1", (email,)).fetchone()
         if not row:
             raise Forbidden("No BrandGuard account for this identity. Ask an admin to add you.")
@@ -553,6 +614,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/mfa/disable")
     def mfa_disable():
         user, data, c = me(), payload(), conn()
+        refuse_for_shared_demo_account(user)
         row = c.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
         if not row["totp_secret"]:
             raise ValueError("Two-step sign-in is not on")
@@ -758,8 +820,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/content")
     def content_create():
         user, data = me(), payload()
+        mode = ai_mode(data)
+        spend_ai_budget(user, mode)
         cid = wf.create_content(conn(), user, data.get("title"), data.get("body"), data.get("images"), judge_factory,
-                                ai_mode(data))
+                                mode)
         return jsonify(id=cid), 201
 
     def detail_payload(user: dict, c: sqlite3.Connection, cid: int) -> dict:
@@ -817,8 +881,10 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
 
     @app.post("/api/content/<int:cid>/revise")
     def content_revise(cid: int):
-        data = payload()
-        ver = wf.revise(conn(), me(), cid, data.get("body"), data.get("images"), judge_factory, ai_mode(data))
+        data, user = payload(), me()
+        mode = ai_mode(data)
+        spend_ai_budget(user, mode)
+        ver = wf.revise(conn(), user, cid, data.get("body"), data.get("images"), judge_factory, mode)
         return jsonify(version=ver)
 
     @app.post("/api/content/<int:cid>/review")
@@ -829,7 +895,9 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise Forbidden("You cannot re-run the review on this content")
         if content["status"] == "approved":
             raise Forbidden("Approved content is locked")
-        return jsonify(wf.run_review(conn(), cid, judge_factory, ai_mode(request.get_json(silent=True) or {})))
+        mode = ai_mode(payload())
+        spend_ai_budget(user, mode)
+        return jsonify(wf.run_review(conn(), cid, judge_factory, mode, user["id"]))
 
     @app.post("/api/findings/<int:fid>/decide")
     def finding_decide(fid: int):
@@ -841,15 +909,16 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
     @app.post("/api/findings/<int:fid>/rewrites")
     def finding_rewrites(fid: int):
         """Checked rewrite options for a finding. {"use_ai": true} adds wording from the AI provider (masked text)."""
-        use_ai = payload().get("use_ai", False)
+        use_ai, user = payload().get("use_ai", False), me()
         if not isinstance(use_ai, bool):
             raise ValueError("use_ai must be true or false")
         factory = None
         if use_ai:
             if not llm.ai_available(app.config["LLM_CALL"]):
                 raise ValueError("No AI provider is configured on this server")
+            spend_ai_budget(user)
             factory = lambda c, cid, ver: llm.make_rewriter(c, cid, ver, call=app.config["LLM_CALL"])
-        return jsonify(wf.rewrite_options(conn(), me(), fid, factory))
+        return jsonify(wf.rewrite_options(conn(), user, fid, factory))
 
     @app.post("/api/content/<int:cid>/comments")
     def content_comment(cid: int):
@@ -921,6 +990,7 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
             raise ValueError("No AI provider is configured on this server, so the AI judge cannot be measured.")
         if bench.pending(c):
             raise ValueError("A benchmark with the AI judge is already running. Reload in a minute.")
+        spend_ai_budget(user)
         wf.audit(c, None, user["id"], "benchmark_run", "with the AI judge")
 
         def work(run_id: int) -> None:
@@ -977,11 +1047,11 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if len(q) < 2:
             return jsonify(results=[])
         q = q[:120]
-        like = f"%{q}%"
+        like = _like_pattern(q)
         c = conn()
         rows = c.execute(
             "SELECT id, title, status, author_id, created_at FROM content "
-            "WHERE (title LIKE ? OR id IN (SELECT content_id FROM versions WHERE body LIKE ?)) "
+            "WHERE (title LIKE ? ESCAPE '\\' OR id IN (SELECT content_id FROM versions WHERE body LIKE ? ESCAPE '\\')) "
             "ORDER BY id DESC LIMIT 20", (like, like)
         ).fetchall()
         visible = []
@@ -992,18 +1062,18 @@ def create_app(db_path: str | None = None, llm_call=None) -> Flask:
         if not user["is_external"]:
             level = wf.clearance(user)
             facts = c.execute(
-                "SELECT code, statement, access_level FROM facts WHERE statement LIKE ? ORDER BY code LIMIT 20", (like,)
+                "SELECT code, statement, access_level FROM facts WHERE statement LIKE ? ESCAPE '\\' ORDER BY code LIMIT 20", (like,)
             ).fetchall()
             rules = c.execute(
                 "SELECT r.code, r.title, r.text, g.access_level FROM rules r JOIN guidelines g ON g.id=r.guideline_id "
-                "WHERE r.title LIKE ? OR r.text LIKE ? ORDER BY r.code LIMIT 20", (like, like)
+                "WHERE r.title LIKE ? ESCAPE '\\' OR r.text LIKE ? ESCAPE '\\' ORDER BY r.code LIMIT 20", (like, like)
             ).fetchall()
             for f in facts:
                 if LEVELS[f["access_level"]] <= level:
-                    visible.append({"kind": "fact", "id": f["code"], "title": f["code"], "snippet": f["statement"], "access_level": f["access_level"]})
+                    visible.append({"kind": "fact", "id": f["code"], "title": f["code"], "snippet": _snippet(f["statement"], q), "access_level": f["access_level"]})
             for r in rules:
                 if LEVELS[r["access_level"]] <= level:
-                    visible.append({"kind": "rule", "id": r["code"], "title": r["title"], "snippet": r["text"], "access_level": r["access_level"]})
+                    visible.append({"kind": "rule", "id": r["code"], "title": r["title"], "snippet": _snippet(r["text"], q), "access_level": r["access_level"]})
         return jsonify(results=visible[:40])
 
     @app.get("/api/ops/metrics")

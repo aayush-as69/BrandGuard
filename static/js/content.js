@@ -184,7 +184,11 @@ function decide(id,action,text,reason){run(async()=>{
   toast(action==='dismiss'?'Dismissed.':'Applied as version '+r.new_version+'. Content was re-reviewed.');await renderContent()})}
 const act=(a)=>run(async()=>{await api('/api/content/'+CUR+'/'+a,{method:'POST',json:{}});
   toast({submit:'Submitted for approval.',approve:'Approved. This version is now locked.',review:'Review re-run.'}[a]);await renderContent()});
-const reqChanges=()=>{const note=prompt('What needs to change?');if(note)run(async()=>{await api('/api/content/'+CUR+'/request-changes',{json:{note}});toast('Changes requested.');await renderContent()})};
+const reqChanges=()=>run(async()=>{
+  const done=await askDialog({title:'Request changes',note:'Tell the author what needs to change.',ok:'Request changes',
+    fields:[{id:'note',label:'What needs to change?'}],
+    onSubmit:v=>api('/api/content/'+CUR+'/request-changes',{json:{note:v.note.trim()}})});
+  if(done){toast('Changes requested.');await renderContent()}});
 const comment=()=>run(async()=>{const b=$('#cm').value;await api('/api/content/'+CUR+'/comments',{json:{body:b}});await renderContent()});
 const revise=()=>run(async()=>{await api('/api/content/'+CUR+'/revise',{json:{body:$('#rb').value,images:DETAIL.images,use_ai:useAI('rai')}});
   toast('Saved as a new version and re-reviewed.');await renderContent()});
